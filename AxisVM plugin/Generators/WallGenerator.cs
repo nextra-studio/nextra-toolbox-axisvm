@@ -11,16 +11,16 @@ namespace AxisVM_plugin.Generators
         public static void GenerateWall(IAxisVMModel model, UI.SettingsForm form, System.Array selectedLines, System.Array lineDataArr, RPoint3d p0, double nx, double ny, double nz)
         {
             int panelMatId = form.cmbPanelMaterial.SelectedIndex + 1;
-            double panelThickness = (double)form.numPanelThickness.Value;
+            double panelThickness = (double)form.numPanelThickness.Value / 1000.0;
             int studMatId = form.cmbStudMaterial.SelectedIndex + 1;
             int studSecId = form.cmbStudSection.SelectedIndex + 1;
-            double spacing = (double)form.numStudSpacing.Value;
-            double studOffset = (double)form.numStudOffset.Value;
+            double spacing = (double)form.numStudSpacing.Value / 1000.0;
+            double studOffset = (double)form.numStudOffset.Value / 1000.0;
 
             int topBeamMatId = form.cmbTopBeamMaterial.SelectedIndex + 1;
             int topBeamSecId = form.cmbTopBeamSection.SelectedIndex + 1;
-            double fastenerSpacing_m = (double)form.numFastenerSpacing.Value;
-            double slipModulus_kNm = (double)form.numSlipModulus.Value;
+            double fastenerSpacing_m = (double)form.numFastenerSpacing.Value / 1000.0;
+            double slipModulus_kNm = (double)form.numSlipModulus.Value; // 1 N/mm = 1 kN/m
 
             // 1. Create the Domain on original nodes
             RSurfaceAttr surfaceAttr = new RSurfaceAttr();
