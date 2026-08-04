@@ -236,13 +236,14 @@ namespace AxisVM_plugin.Generators
 
                             double stiffY = (tribLength / fastenerSpacing_m) * slipModulus_kNm;
                             double stiffZ = isBoundary ? 1e10 : 0; // Rigid in Z for corners, free for internals
+                            double stiffRot = isBoundary ? 1e10 : 0; // Rigid rotation for corners, free for internals
 
                             string key1 = string.Format("{0}_{1}", domN1, offN1);
                             if (!springTracker.Contains(key1))
                             {
                                 RLineGeomData sGeom1 = new RLineGeomData();
                                 int spring1 = model.Lines.Add(domN1, offN1, ELineGeomType.lgtStraightLine, ref sGeom1);
-                                AxisVMHelper.SetLineSpringAttributes(model, spring1, stiffY, stiffZ, 0, refId);
+                                AxisVMHelper.SetLineSpringAttributes(model, spring1, stiffY, stiffZ, stiffRot, refId);
                                 springTracker.Add(key1);
                                 springLineIds.Add(spring1);
                                 linesToIntersectList.Add(spring1);
@@ -253,7 +254,7 @@ namespace AxisVM_plugin.Generators
                             {
                                 RLineGeomData sGeom2 = new RLineGeomData();
                                 int spring2 = model.Lines.Add(domN2, offN2, ELineGeomType.lgtStraightLine, ref sGeom2);
-                                AxisVMHelper.SetLineSpringAttributes(model, spring2, stiffY, stiffZ, 0, refId);
+                                AxisVMHelper.SetLineSpringAttributes(model, spring2, stiffY, stiffZ, stiffRot, refId);
                                 springTracker.Add(key2);
                                 springLineIds.Add(spring2);
                                 linesToIntersectList.Add(spring2);
