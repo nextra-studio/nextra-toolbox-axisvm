@@ -134,6 +134,35 @@ namespace AxisVM_plugin.Core
             catch { }
         }
         
+        public static void SetLineEndReleases(IAxisVMModel model, int lineId, bool startSemiRigid, bool endSemiRigid)
+        {
+            try
+            {
+                RReleases relRigid = new RReleases();
+                relRigid.x = new RRelease() { ReleaseType = EReleaseType.rtRigid };
+                relRigid.y = new RRelease() { ReleaseType = EReleaseType.rtRigid };
+                relRigid.z = new RRelease() { ReleaseType = EReleaseType.rtRigid };
+                relRigid.xx = new RRelease() { ReleaseType = EReleaseType.rtRigid };
+                relRigid.yy = new RRelease() { ReleaseType = EReleaseType.rtRigid };
+                relRigid.zz = new RRelease() { ReleaseType = EReleaseType.rtRigid };
+
+                RReleases relSemi = new RReleases();
+                relSemi.x = new RRelease() { ReleaseType = EReleaseType.rtRigid };
+                relSemi.y = new RRelease() { ReleaseType = EReleaseType.rtRigid };
+                relSemi.z = new RRelease() { ReleaseType = EReleaseType.rtRigid };
+                relSemi.xx = new RRelease() { ReleaseType = EReleaseType.rtSemiRigid, Init = 1.0 };
+                relSemi.yy = new RRelease() { ReleaseType = EReleaseType.rtSemiRigid, Init = 1.0 };
+                relSemi.zz = new RRelease() { ReleaseType = EReleaseType.rtSemiRigid, Init = 1.0 };
+
+                if (startSemiRigid) model.Lines.Item[lineId].SetStartReleases(ref relSemi);
+                else model.Lines.Item[lineId].SetStartReleases(ref relRigid);
+                
+                if (endSemiRigid) model.Lines.Item[lineId].SetEndReleases(ref relSemi);
+                else model.Lines.Item[lineId].SetEndReleases(ref relRigid);
+            }
+            catch { }
+        }
+        
         public static int CreateReferenceVector(IAxisVMModel model, double vx, double vy, double vz)
         {
             RReference r = new RReference();

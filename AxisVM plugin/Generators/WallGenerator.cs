@@ -43,6 +43,9 @@ namespace AxisVM_plugin.Generators
             model.BeginUpdate();
             try
             {
+                // Create reference vectors for stud orientation (local Z axis)
+                int refLeftId = AxisVMHelper.CreateReferenceVector(model, nx, ny, nz);
+                int refRightId = AxisVMHelper.CreateReferenceVector(model, -nx, -ny, -nz);
                 // 2. Determine Local Axes for the Wall
                 double Ux, Uy, Uz, Vx, Vy, Vz;
                 if (Math.Abs(nz) < 0.99)
@@ -121,7 +124,7 @@ namespace AxisVM_plugin.Generators
                     double dU = Math.Abs(uv.Item3 - uv.Item1);
                     double dV = Math.Abs(uv.Item4 - uv.Item2);
                     
-                    int matId, secId;
+                    int matId = 0, secId = 0;
                     bool isStud = (dV > dU);
                     if (isStud) 
                     {
@@ -129,88 +132,23 @@ namespace AxisVM_plugin.Generators
                         int lineId = (int)selectedLines.GetValue(i + 1); // 1-based array from COM
                         AxisVMHelper.SetLineBeamAttributes(model, lineId, matId, secId, isRib: true);
                         AxisVMHelper.SetLineReleases(model, lineId, isPin: true);
-                    }
-                    else
-                    {
-                        matId = topBeamMatId; secId = topBeamSecId; // Top/Bottom Beam
-                        int lineId = (int)selectedLines.GetValue(i + 1); // 1-based array from COM
-                        AxisVMHelper.SetLineBeamAttributes(model, lineId, matId, secId, isRib: false);
-                    }
-
-                    if (isStud && studOffset != 0)
-                    {
-                        // Generate offset lines for boundary studs
-                        double lu1 = uv.Item1;
-                        double lu2 = uv.Item3;
-                        double lv1 = uv.Item2;
-                        double lv2 = uv.Item4;
                         
-                        double x1 = p0.x + lu1 * Ux + lv1 * Vx + ox;
-                        double y1 = p0.y + lu1 * Uy + lv1 * Vy + oy;
-                        double z1 = p0.z + lu1 * Uz + lv1 * Vz + oz;
-                        
-                        double x2 = p0.x + lu2 * Ux + lv2 * Vx + ox;
-                        double y2 = p0.y + lu2 * Uy + lv2 * Vy + oy;
-                        double z2 = p0.z + lu2 * Uz + lv2 * Vz + oz;
-                        
-                        int offN1 = model.Nodes.Add(x1, y1, z1);
-                        int offN2 = model.Nodes.Add(x2, y2, z2);
-                        
-                        RLineGeomData geomData = new RLineGeomData();
-                        int lineId = model.Lines.Add(offN1, offN2, ELineGeomType.lgtStraightLine, ref geomData);
-                        AxisVMHelper.SetLineBeamAttributes(model, lineId, matId, secId, isRib: false);
-                        AxisVMHelper.SetLineReleases(model, lineId, isPin: false);
-
-                        if (studOffset != 0)
-                        {
-                            double dx1 = p0.x + lu1 * Ux + lv1 * Vx;
-                            double dy1 = p0.y + lu1 * Uy + lv1 * Vy;
-                            double dz1 = p0.z + lu1 * Uz + lv1 * Vz;
-                            
-                            double dx2 = p0.x + lu2 * Ux + lv2 * Vx;
-                            double dy2 = p0.y + lu2 * Uy + lv2 * Vy;
-                            double dz2 = p0.z + lu2 * Uz + lv2 * Vz;
-                            
-                            int domN1 = model.Nodes.Add(dx1, dy1, dz1);
-                            int domN2 = model.Nodes.Add(dx2, dy2, dz2);
-                            
-                            double cornerStiffY = (gap / 2.0) / fastenerSpacing_m * slipModulus_kNm;
-                            double cornerStiffZ = 1e10; // Rigid in Z for corners
-
-                            string key1 = string.Format("{0}_{1}", domN1, offN1);
-                            if (!springTracker.Contains(key1))
-                            {
-                                RLineGeomData sGeom1 = new RLineGeomData();
-                                int spring1 = model.Lines.Add(domN1, offN1, ELineGeomType.lgtStraightLine, ref sGeom1);
-                                AxisVMHelper.SetLineSpringAttributes(model, spring1, cornerStiffY, cornerStiffZ, 1e10, refId);
-                                springTracker.Add(key1);
-                                springLineIds.Add(spring1);
-                                linesToIntersectList.Add(spring1);
-                            }
-                            
-                            string key2 = string.Format("{0}_{1}", domN2, offN2);
-                            if (!springTracker.Contains(key2))
-                            {
-                                RLineGeomData sGeom2 = new RLineGeomData();
-                                int spring2 = model.Lines.Add(domN2, offN2, ELineGeomType.lgtStraightLine, ref sGeom2);
-                                AxisVMHelper.SetLineSpringAttributes(model, spring2, cornerStiffY, cornerStiffZ, 1e10, refId);
-                                springTracker.Add(key2);
-                                springLineIds.Add(spring2);
-                                linesToIntersectList.Add(spring2);
-                            }
+                        double lu = uv.Item1;
+                        if (Math.Abs(lu - uMax) < 1e-3) {
+                            model.Lines.Item[lineId].Reference = refRightId;
+                        } else {
+                            model.Lines.Item[lineId].Reference = refLeftId;
                         }
                     }
                 }
 
-                // 5. Generate Internal Studs and Springs
-                double u = uMin + gap;
-                for (int i = 0; i <= numSpaces; i++)
+                int prevOffN1 = -1, prevOffN2 = -1;
+                double u = uMin;
+                for (int i = 0; i <= numSpaces + 1; i++) // include uMin and uMax
                 {
-                    if (Math.Abs(u - uMin) < 1e-3 || Math.Abs(u - uMax) < 1e-3)
-                    {
-                        u += spacing;
-                        continue; // Skip boundary studs (handled in step 4)
-                    }
+                    if (i == 0) u = uMin;
+                    else if (i == numSpaces + 1) u = uMax;
+                    else u = uMin + gap + (i - 1) * spacing;
 
                     List<double> vIntersects = new List<double>();
                     foreach (var l in linesUV)
@@ -223,14 +161,19 @@ namespace AxisVM_plugin.Generators
                                 double v = lv1 + (u - lu1) * (lv2 - lv1) / (lu2 - lu1);
                                 vIntersects.Add(v);
                             }
+                            else if (Math.Abs(u - lu1) < 1e-3)
+                            {
+                                vIntersects.Add(lv1);
+                                vIntersects.Add(lv2);
+                            }
                         }
                     }
                     vIntersects.Sort();
                     
-                    for (int j = 0; j < vIntersects.Count - 1; j += 2)
+                    if (vIntersects.Count >= 2)
                     {
-                        double vStart = vIntersects[j];
-                        double vEnd = vIntersects[j+1];
+                        double vStart = vIntersects[0];
+                        double vEnd = vIntersects[vIntersects.Count - 1];
                         if (Math.Abs(vStart - vEnd) < 1e-3) continue;
                         
                         double dx1 = p0.x + u * Ux + vStart * Vx, dy1 = p0.y + u * Uy + vStart * Vy, dz1 = p0.z + u * Uz + vStart * Vz;
@@ -238,18 +181,52 @@ namespace AxisVM_plugin.Generators
                         
                         double x1 = dx1 + ox, y1 = dy1 + oy, z1 = dz1 + oz;
                         double x2 = dx2 + ox, y2 = dy2 + oy, z2 = dz2 + oz;
-                        
+
                         int domN1 = model.Nodes.Add(dx1, dy1, dz1);
                         int domN2 = model.Nodes.Add(dx2, dy2, dz2);
+
+                        int offN1, offN2;
+                        if (i == 0 || i == numSpaces + 1) {
+                            offN1 = domN1;
+                            offN2 = domN2;
+                        } else {
+                            offN1 = model.Nodes.Add(x1, y1, z1); // Bottom Offset Node
+                            offN2 = model.Nodes.Add(x2, y2, z2); // Top Offset Node
+                        }
+
+                        // Generate segmented beams between offset studs
+                        if (prevOffN1 != -1 && prevOffN2 != -1)
+                        {
+                            bool startSemiRigid = (i == 1);
+                            bool endSemiRigid = (i == numSpaces + 1);
+
+                            RLineGeomData bGeom1 = new RLineGeomData();
+                            int bLine1 = model.Lines.Add(prevOffN1, offN1, ELineGeomType.lgtStraightLine, ref bGeom1);
+                            AxisVMHelper.SetLineBeamAttributes(model, bLine1, topBeamMatId, topBeamSecId, isRib: false);
+                            AxisVMHelper.SetLineEndReleases(model, bLine1, startSemiRigid, endSemiRigid);
+
+                            RLineGeomData bGeom2 = new RLineGeomData();
+                            int bLine2 = model.Lines.Add(prevOffN2, offN2, ELineGeomType.lgtStraightLine, ref bGeom2);
+                            AxisVMHelper.SetLineBeamAttributes(model, bLine2, topBeamMatId, topBeamSecId, isRib: false);
+                            AxisVMHelper.SetLineEndReleases(model, bLine2, startSemiRigid, endSemiRigid);
+                        }
+
+                        prevOffN1 = offN1;
+                        prevOffN2 = offN2;
+
+                        if (Math.Abs(u - uMin) < 1e-3 || Math.Abs(u - uMax) < 1e-3)
+                        {
+                            continue; // Skip creating the vertical stud line, it was already handled in Step 4
+                        }
                         
-                        int offN1 = model.Nodes.Add(x1, y1, z1);
-                        int offN2 = model.Nodes.Add(x2, y2, z2);
+
                         
                         RLineGeomData geomData = new RLineGeomData();
                         int studId = model.Lines.Add(offN1, offN2, ELineGeomType.lgtStraightLine, ref geomData);
                         
                         AxisVMHelper.SetLineBeamAttributes(model, studId, studMatId, studSecId, isRib: false);
                         AxisVMHelper.SetLineReleases(model, studId, isPin: true); // internal studs are pinned
+                        model.Lines.Item[studId].Reference = refLeftId; // Internal studs orient like the left boundary
                         
                         if (studOffset != 0)
                         {
@@ -282,7 +259,6 @@ namespace AxisVM_plugin.Generators
                             }
                         }
                     }
-                    u += spacing;
                 }
             }
             finally
