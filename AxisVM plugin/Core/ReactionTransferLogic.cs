@@ -34,13 +34,68 @@ namespace AxisVM_plugin.Core
             // TODO: Implement actual extraction logic
             
             // 3. Connect to Target Model
-            // IAxisVMModel targetModel = null;
-            // TODO: Implement target model initialization using AxisVM API. 
-            // e.g. If AxisVM allows multiple models, get the new model reference.
-            // For now, we will just simulate success.
-            
-            MessageBox.Show("Transfer logic skeleton executed. Actual COM data transfer to be implemented.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return true;
+            IAxisVMModel targetModel = null;
+            if (settings.IsNewFile)
+            {
+                // Create a new model
+                int newModelIndex = axisApp.Models.New();
+                targetModel = axisApp.Models.Item[newModelIndex];
+                
+                // Save the newly created model to the specified path
+                targetModel.SaveToFile(settings.TargetFilePath, ELongBoolean.lbFalse);
+            }
+            else
+            {
+                // Open existing model
+                int modelIndex = axisApp.Models.New();
+                targetModel = axisApp.Models.Item[modelIndex];
+                targetModel.LoadFromFile(settings.TargetFilePath);
+            }
+
+            if (targetModel == null)
+            {
+                MessageBox.Show("Failed to open or create target model.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+
+            try
+            {
+                targetModel.BeginUpdate();
+
+                // 4. Transfer Loads (Cases, Groups, Combinations)
+                if (settings.TransferLoadGroups) TransferLoadGroups(sourceModel, targetModel, settings);
+                if (settings.TransferLoadCases) TransferLoadCases(sourceModel, targetModel, settings);
+                if (settings.TransferLoadCombinations) TransferLoadCombinations(sourceModel, targetModel, settings);
+
+                // 5. Transfer Geometry
+                if (settings.TransferBottomBeams)
+                {
+                    TransferBottomBeamsAndTidyUp(sourceModel, targetModel, settings);
+                }
+
+                // 6. Transfer Reactions as Loads
+                ApplyReactionsAsLoads(sourceModel, targetModel, settings);
+
+                // 7. Transfer Supports
+                if (settings.TransferSupports)
+                {
+                    TransferSupports(sourceModel, targetModel, settings);
+                }
+
+                targetModel.EndUpdate();
+                
+                // Save the target model changes
+                targetModel.SaveToFile(settings.TargetFilePath, ELongBoolean.lbFalse);
+                
+                MessageBox.Show($"Transfer logic skeleton executed.\nFile saved to: {settings.TargetFilePath}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                targetModel.EndUpdate();
+                MessageBox.Show($"Error during data transfer: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
         }
 
         private static bool ValidateSource(IAxisVMModel sourceModel, ReactionTransferSettings settings)
