@@ -50,10 +50,14 @@
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Master.cs" />
+    <Compile Include="Addons\StudsWallAddon.cs" />
+    <Compile Include="Addons\ReactionTransferAddon.cs" />
     <Compile Include="UI\SettingsForm.cs" />
+    <Compile Include="UI\ReactionTransferForm.cs" />
     <Compile Include="Core\AxisVMHelper.cs" />
+    <Compile Include="Core\ReactionTransferLogic.cs" />
     <Compile Include="Functions\StudsWallFunction.cs" />
+    <Compile Include="Functions\ReactionTransferFunction.cs" />
     <Compile Include="Generators\WallGenerator.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

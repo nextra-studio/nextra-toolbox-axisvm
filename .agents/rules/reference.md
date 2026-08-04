@@ -15,4 +15,5 @@ This is AI copilot with some tools, so you could refer to it as well if nessesar
 
 
 Once modify or edit, then always build dotnet plz, then copy the dll in the bin into:
-"C:\AXISVM X8\Plugins"
+"C:\AXISVM X8\AddOns" for addons
+"C:\AXISVM X8\Plugins" for plugins
