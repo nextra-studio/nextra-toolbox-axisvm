@@ -98,14 +98,15 @@ namespace AxisVM_plugin.Generators
 
                 // 3. Calculate gaps and spaces (needed for springs and studs)
                 double L = uMax - uMin;
-                int numSpaces = (int)Math.Ceiling(L / spacing);
-                double gap = (L - (numSpaces * spacing)) / 2.0; // split remaining space
-                if (gap < 0) gap = 0; // fallback if exact
-                if (numSpaces * spacing > L)
+                int numInternalSpaces = (int)Math.Floor(L / spacing);
+                double remaining = L - (numInternalSpaces * spacing);
+                if (remaining < 1e-3)
                 {
-                    gap = (L - ((numSpaces - 1) * spacing)) / 2.0;
-                    numSpaces -= 1;
+                    numInternalSpaces -= 1;
+                    remaining += spacing;
                 }
+                double gap = remaining / 2.0;
+                int numInternalStuds = numInternalSpaces + 1;
 
                 // We need to auto-intersect the boundary lines and springs to avoid meshing errors.
                 foreach (int lineId in selectedLines)
@@ -144,10 +145,10 @@ namespace AxisVM_plugin.Generators
 
                 int prevOffN1 = -1, prevOffN2 = -1;
                 double u = uMin;
-                for (int i = 0; i <= numSpaces + 1; i++) // include uMin and uMax
+                for (int i = 0; i <= numInternalStuds + 1; i++) // include uMin and uMax
                 {
                     if (i == 0) u = uMin;
-                    else if (i == numSpaces + 1) u = uMax;
+                    else if (i == numInternalStuds + 1) u = uMax;
                     else u = uMin + gap + (i - 1) * spacing;
 
                     List<double> vIntersects = new List<double>();
@@ -185,20 +186,14 @@ namespace AxisVM_plugin.Generators
                         int domN1 = model.Nodes.Add(dx1, dy1, dz1);
                         int domN2 = model.Nodes.Add(dx2, dy2, dz2);
 
-                        int offN1, offN2;
-                        if (i == 0 || i == numSpaces + 1) {
-                            offN1 = domN1;
-                            offN2 = domN2;
-                        } else {
-                            offN1 = model.Nodes.Add(x1, y1, z1); // Bottom Offset Node
-                            offN2 = model.Nodes.Add(x2, y2, z2); // Top Offset Node
-                        }
+                        int offN1 = model.Nodes.Add(x1, y1, z1); // Bottom Offset Node
+                        int offN2 = model.Nodes.Add(x2, y2, z2); // Top Offset Node
 
                         // Generate segmented beams between offset studs
                         if (prevOffN1 != -1 && prevOffN2 != -1)
                         {
                             bool startSemiRigid = (i == 1);
-                            bool endSemiRigid = (i == numSpaces + 1);
+                            bool endSemiRigid = (i == numInternalStuds + 1);
 
                             RLineGeomData bGeom1 = new RLineGeomData();
                             int bLine1 = model.Lines.Add(prevOffN1, offN1, ELineGeomType.lgtStraightLine, ref bGeom1);
@@ -214,34 +209,40 @@ namespace AxisVM_plugin.Generators
                         prevOffN1 = offN1;
                         prevOffN2 = offN2;
 
-                        if (Math.Abs(u - uMin) < 1e-3 || Math.Abs(u - uMax) < 1e-3)
-                        {
-                            continue; // Skip creating the vertical stud line, it was already handled in Step 4
-                        }
-                        
+                        bool isBoundary = (i == 0 || i == numInternalStuds + 1);
 
-                        
-                        RLineGeomData geomData = new RLineGeomData();
-                        int studId = model.Lines.Add(offN1, offN2, ELineGeomType.lgtStraightLine, ref geomData);
-                        
-                        AxisVMHelper.SetLineBeamAttributes(model, studId, studMatId, studSecId, isRib: false);
-                        AxisVMHelper.SetLineReleases(model, studId, isPin: true); // internal studs are pinned
-                        model.Lines.Item[studId].Reference = refLeftId; // Internal studs orient like the left boundary
+                        if (!isBoundary)
+                        {
+                            RLineGeomData geomData = new RLineGeomData();
+                            int studId = model.Lines.Add(offN1, offN2, ELineGeomType.lgtStraightLine, ref geomData);
+                            
+                            AxisVMHelper.SetLineBeamAttributes(model, studId, studMatId, studSecId, isRib: false);
+                            AxisVMHelper.SetLineReleases(model, studId, isPin: true); // internal studs are pinned
+                            model.Lines.Item[studId].Reference = refLeftId; // Internal studs orient like the left boundary
+                        }
                         
                         if (studOffset != 0)
                         {
-                            double dLeft = (i == 0) ? gap : spacing;
-                            double dRight = (i == numSpaces) ? gap : spacing;
-                            double tribLength = (dLeft + dRight) / 2.0;
-                            double internalStiffY = (tribLength / fastenerSpacing_m) * slipModulus_kNm;
-                            double internalStiffZ = 0; // Free to slip in Z
+                            double tribLength;
+                            if (isBoundary) {
+                                tribLength = gap / 2.0;
+                            } else if (i == 1 && i == numInternalStuds) {
+                                tribLength = gap;
+                            } else if (i == 1 || i == numInternalStuds) {
+                                tribLength = (gap + spacing) / 2.0;
+                            } else {
+                                tribLength = spacing;
+                            }
+
+                            double stiffY = (tribLength / fastenerSpacing_m) * slipModulus_kNm;
+                            double stiffZ = isBoundary ? 1e10 : 0; // Rigid in Z for corners, free for internals
 
                             string key1 = string.Format("{0}_{1}", domN1, offN1);
                             if (!springTracker.Contains(key1))
                             {
                                 RLineGeomData sGeom1 = new RLineGeomData();
                                 int spring1 = model.Lines.Add(domN1, offN1, ELineGeomType.lgtStraightLine, ref sGeom1);
-                                AxisVMHelper.SetLineSpringAttributes(model, spring1, internalStiffY, internalStiffZ, 0, refId);
+                                AxisVMHelper.SetLineSpringAttributes(model, spring1, stiffY, stiffZ, 0, refId);
                                 springTracker.Add(key1);
                                 springLineIds.Add(spring1);
                                 linesToIntersectList.Add(spring1);
@@ -252,7 +253,7 @@ namespace AxisVM_plugin.Generators
                             {
                                 RLineGeomData sGeom2 = new RLineGeomData();
                                 int spring2 = model.Lines.Add(domN2, offN2, ELineGeomType.lgtStraightLine, ref sGeom2);
-                                AxisVMHelper.SetLineSpringAttributes(model, spring2, internalStiffY, internalStiffZ, 0, refId);
+                                AxisVMHelper.SetLineSpringAttributes(model, spring2, stiffY, stiffZ, 0, refId);
                                 springTracker.Add(key2);
                                 springLineIds.Add(spring2);
                                 linesToIntersectList.Add(spring2);
