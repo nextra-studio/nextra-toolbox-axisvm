@@ -15,11 +15,11 @@ namespace AxisVM_plugin.Addons
         public int AxisVMMainFormHandle { get; set; }
         public int AxisVMApplicationHandle { get; set; }
 
-        public string Plugin_MenuItemText { get { return "Nextra (Studs Wall)"; } }
+        public string Plugin_MenuItemText { get { return "N. Studs Wall"; } }
 
         public string Plugin_GetTranslatedMenuItemText(int PrgLang)
         {
-            return "Nextra (Studs Wall)";
+            return "N. Studs Wall";
         }
 
         public int Plugin_IsMenuItemEnabled(object iAxisVMApp) { return 0; }
@@ -42,7 +42,7 @@ namespace AxisVM_plugin.Addons
 
         // Addon methods (toolbar)
         public string Addon_HintText { get { return "Nextra Studs Wall Generator"; } }
-        public string Addon_GetTranslatedHintText(int PrgLang) { return "Nextra Studs Wall Generator"; }
+        public string Addon_GetTranslatedHintText(int PrgLang) { return "N. Studs Wall Generator"; }
         public int Addon_IsItemEnabled(object iAxisVMApp) { return 1; }
         public int Addon_IsItemVisible(object iAxisVMApp) { return 1; }
         public int Addon_IsModalWindow { get { return 0; } }

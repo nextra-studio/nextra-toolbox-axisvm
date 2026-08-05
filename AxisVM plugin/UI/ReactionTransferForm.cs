@@ -12,23 +12,13 @@ namespace AxisVM_plugin.UI
         public RadioButton rbNewFile;
         public RadioButton rbExistingFile;
         
-        public CheckBox chkTransferSupports;
-        public CheckBox chkTransferLoadCases;
-        public CheckBox chkTransferLoadGroups;
-        public CheckBox chkTransferLoadCombinations;
-        
-        public RadioButton rbMergeLoads;
-        public RadioButton rbReplaceLoads;
-        
-        public RadioButton rbTransferSelectedElements;
-        public RadioButton rbTransferParts;
-        
-        public CheckBox chkTransferBottomBeams;
-        
         public RadioButton rbNodePointLoads;
         public RadioButton rbBeamPointLoads;
         
+        public ComboBox cbResultType;
+        
         public CheckBox chkTidyUpLines;
+        public CheckBox chkTransferSupports;
         
         public Button btnTransfer;
         public Button btnCancel;
@@ -41,7 +31,7 @@ namespace AxisVM_plugin.UI
         private void InitializeComponent()
         {
             this.Text = "Reaction Transfer";
-            this.Size = new Size(400, 600);
+            this.Size = new Size(480, 480);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
@@ -51,62 +41,53 @@ namespace AxisVM_plugin.UI
             int xPos = 20;
 
             // Target File Selection
-            GroupBox gbTarget = new GroupBox() { Text = "Target Model", Location = new Point(xPos, yPos), Size = new Size(340, 100) };
+            GroupBox gbTarget = new GroupBox() { Text = "Target Model", Location = new Point(xPos, yPos), Size = new Size(420, 100) };
             rbNewFile = new RadioButton() { Text = "Create New File", Location = new Point(20, 20), Checked = true };
-            rbExistingFile = new RadioButton() { Text = "Modify Existing File", Location = new Point(160, 20) };
+            rbExistingFile = new RadioButton() { Text = "Modify Existing File", Location = new Point(160, 20), AutoSize = true, Enabled = false }; // Disable existing file for now to prevent overwriting
             
-            txtFilePath = new TextBox() { Location = new Point(20, 50), Size = new Size(220, 20), ReadOnly = true };
-            btnBrowse = new Button() { Text = "Browse...", Location = new Point(250, 48), Size = new Size(75, 23) };
+            txtFilePath = new TextBox() { Location = new Point(20, 50), Size = new Size(300, 20), ReadOnly = true };
+            btnBrowse = new Button() { Text = "Browse...", Location = new Point(330, 48), Size = new Size(75, 23) };
             btnBrowse.Click += BtnBrowse_Click;
             
             gbTarget.Controls.AddRange(new Control[] { rbNewFile, rbExistingFile, txtFilePath, btnBrowse });
             this.Controls.Add(gbTarget);
             yPos += 110;
 
-            // Source Selection
-            GroupBox gbSource = new GroupBox() { Text = "Transfer Source", Location = new Point(xPos, yPos), Size = new Size(340, 60) };
-            rbTransferSelectedElements = new RadioButton() { Text = "Selected Elements", Location = new Point(20, 25), Checked = true };
-            rbTransferParts = new RadioButton() { Text = "Specific Parts", Location = new Point(160, 25) };
+            // Result Type Selection
+            GroupBox gbResultType = new GroupBox() { Text = "Result Type to Transfer", Location = new Point(xPos, yPos), Size = new Size(420, 80) };
+            Label lblResultType = new Label() { Text = "Type:", Location = new Point(20, 25), AutoSize = true };
+            cbResultType = new ComboBox() { Location = new Point(70, 22), Size = new Size(250, 20), DropDownStyle = ComboBoxStyle.DropDownList };
+            cbResultType.Items.AddRange(new string[] { "Linear Static (Individual Cases)", "Non-Linear Results", "Envelopes" });
+            cbResultType.SelectedIndex = 0; // Default to Linear Static
             
-            gbSource.Controls.AddRange(new Control[] { rbTransferSelectedElements, rbTransferParts });
-            this.Controls.Add(gbSource);
-            yPos += 70;
-
-            // What to Transfer
-            GroupBox gbItems = new GroupBox() { Text = "Items to Transfer", Location = new Point(xPos, yPos), Size = new Size(340, 100) };
-            chkTransferSupports = new CheckBox() { Text = "Transfer Supports", Location = new Point(20, 20), Checked = true };
-            chkTransferBottomBeams = new CheckBox() { Text = "Transfer Bottom Foundation Beams", Location = new Point(20, 45), Checked = true };
-            chkTransferLoadCases = new CheckBox() { Text = "Load Cases", Location = new Point(20, 70), Checked = true };
-            chkTransferLoadGroups = new CheckBox() { Text = "Load Groups", Location = new Point(120, 70), Checked = true };
-            chkTransferLoadCombinations = new CheckBox() { Text = "Combinations", Location = new Point(220, 70), Checked = true };
+            Label lblGravityWarn = new Label() { 
+                Text = "Note: Gravity (G) load cases cannot have loads added. Please choose/setup load cases without 'G'.", 
+                Location = new Point(20, 50), 
+                AutoSize = false,
+                Size = new Size(380, 30),
+                ForeColor = Color.Red
+            };
             
-            gbItems.Controls.AddRange(new Control[] { chkTransferSupports, chkTransferBottomBeams, chkTransferLoadCases, chkTransferLoadGroups, chkTransferLoadCombinations });
-            this.Controls.Add(gbItems);
-            yPos += 110;
-
-            // Load Case Conflict Resolution
-            GroupBox gbLoads = new GroupBox() { Text = "Load Case Conflicts (Existing Target)", Location = new Point(xPos, yPos), Size = new Size(340, 60) };
-            rbMergeLoads = new RadioButton() { Text = "Merge (Add/Update)", Location = new Point(20, 25), Checked = true };
-            rbReplaceLoads = new RadioButton() { Text = "Replace All", Location = new Point(160, 25) };
-            
-            gbLoads.Controls.AddRange(new Control[] { rbMergeLoads, rbReplaceLoads });
-            this.Controls.Add(gbLoads);
-            yPos += 70;
+            gbResultType.Controls.AddRange(new Control[] { lblResultType, cbResultType, lblGravityWarn });
+            this.Controls.Add(gbResultType);
+            yPos += 90;
 
             // Load Application
-            GroupBox gbApplication = new GroupBox() { Text = "Reaction Application Method", Location = new Point(xPos, yPos), Size = new Size(340, 90) };
-            rbNodePointLoads = new RadioButton() { Text = "Apply as Node Point Loads", Location = new Point(20, 25) };
-            rbBeamPointLoads = new RadioButton() { Text = "Apply as Beam Point Loads", Location = new Point(20, 50), Checked = true };
+            GroupBox gbApplication = new GroupBox() { Text = "Reaction Application Method", Location = new Point(xPos, yPos), Size = new Size(420, 110) };
+            rbNodePointLoads = new RadioButton() { Text = "Apply as Node Point Loads", Location = new Point(20, 25), AutoSize = true };
+            rbBeamPointLoads = new RadioButton() { Text = "Apply as Beam Point Loads", Location = new Point(200, 25), Checked = true, AutoSize = true };
             
-            chkTidyUpLines = new CheckBox() { Text = "Tidy Up (Merge divided horizontal foundation beams)", Location = new Point(20, 75), Checked = true, AutoSize = true };
+            chkTidyUpLines = new CheckBox() { Text = "Tidy Up (Merge divided horizontal foundation beams)", Location = new Point(20, 55), Checked = true, AutoSize = true };
+            chkTransferSupports = new CheckBox() { Text = "Keep Existing Supports", Location = new Point(20, 80), Checked = true, AutoSize = true };
             
-            gbApplication.Controls.AddRange(new Control[] { rbNodePointLoads, rbBeamPointLoads, chkTidyUpLines });
+            gbApplication.Controls.AddRange(new Control[] { rbNodePointLoads, rbBeamPointLoads, chkTidyUpLines, chkTransferSupports });
             this.Controls.Add(gbApplication);
-            yPos += 110;
+            yPos += 130;
 
             // Action Buttons
-            btnTransfer = new Button() { Text = "Transfer", Location = new Point(200, yPos), Size = new Size(80, 30), DialogResult = DialogResult.OK };
-            btnCancel = new Button() { Text = "Cancel", Location = new Point(290, yPos), Size = new Size(80, 30), DialogResult = DialogResult.Cancel };
+            // Action Buttons
+            btnTransfer = new Button() { Text = "Transfer", Location = new Point(260, yPos), Size = new Size(80, 30), DialogResult = DialogResult.OK };
+            btnCancel = new Button() { Text = "Cancel", Location = new Point(360, yPos), Size = new Size(80, 30), DialogResult = DialogResult.Cancel };
             
             this.Controls.Add(btnTransfer);
             this.Controls.Add(btnCancel);
