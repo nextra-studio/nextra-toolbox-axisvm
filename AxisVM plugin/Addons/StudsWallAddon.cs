@@ -55,13 +55,13 @@ namespace AxisVM_plugin.Addons
                     using (var g = Graphics.FromImage(bmp))
                     {
                         g.Clear(Color.Magenta); // Transparent color
-                        using (var pen = new Pen(Color.Brown, 2))
+                        using (var pen = new Pen(Color.Brown, 1))
                         {
                             g.DrawLine(pen, 2, 2, 2, 14);
                             g.DrawLine(pen, 8, 2, 8, 14);
                             g.DrawLine(pen, 14, 2, 14, 14);
-                            g.DrawLine(new Pen(Color.Brown, 2), 2, 14, 14, 14);
-                            g.DrawLine(new Pen(Color.Brown, 2), 2, 2, 14, 2);
+                            g.DrawLine(new Pen(Color.Brown, 1), 2, 14, 14, 14);
+                            g.DrawLine(new Pen(Color.Brown, 1), 2, 2, 14, 2);
                         }
                     }
                     using (var ms = new MemoryStream())

@@ -57,7 +57,7 @@ namespace AxisVM_plugin.Addons
                     {
                         g.Clear(Color.Magenta);
                         
-                        using (var pen = new Pen(Color.Blue, 2))
+                        using (var pen = new Pen(Color.Blue, 1))
                         {
                             g.DrawRectangle(pen, 3, 3, 10, 10);
                             g.DrawLine(Pens.Red, 1, 8, 15, 8); // Indicate width/depth change

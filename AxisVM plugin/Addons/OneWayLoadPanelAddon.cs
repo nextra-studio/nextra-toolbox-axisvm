@@ -57,7 +57,7 @@ namespace AxisVM_plugin.Addons
                     {
                         g.Clear(Color.Magenta); // Transparent color
                         
-                        using (var pen = new Pen(Color.Blue, 2))
+                        using (var pen = new Pen(Color.Blue, 1))
                         {
                             g.DrawRectangle(pen, 2, 2, 12, 12);
                             g.DrawLine(pen, 8, 4, 8, 12);

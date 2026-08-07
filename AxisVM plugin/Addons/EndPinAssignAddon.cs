@@ -57,12 +57,12 @@ namespace AxisVM_plugin.Addons
                     {
                         g.Clear(Color.Magenta); // Transparent color
                         
-                        using (var pen = new Pen(Color.Green, 2))
+                        using (var pen = new Pen(Color.Green, 1))
                         {
                             // Draw a simple line with dots at ends
                             g.DrawLine(pen, 3, 8, 13, 8);
-                            g.FillEllipse(Brushes.Red, 1, 6, 4, 4);
-                            g.FillEllipse(Brushes.Red, 11, 6, 4, 4);
+                            g.FillEllipse(Brushes.Red, 1, 6, 3, 3);
+                            g.FillEllipse(Brushes.Red, 11, 6, 3, 3);
                         }
                     }
                     using (var ms = new MemoryStream())

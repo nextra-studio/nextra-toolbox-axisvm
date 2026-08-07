@@ -57,13 +57,13 @@ namespace AxisVM_plugin.Addons
                     {
                         g.Clear(Color.Magenta); // Transparent color
                         
-                        using (var pen = new Pen(Color.DarkGray, 2))
+                        using (var pen = new Pen(Color.DarkGray, 1))
                         {
                             g.DrawRectangle(pen, 2, 2, 12, 12);
-                            g.FillEllipse(Brushes.Red, 4, 4, 3, 3);
-                            g.FillEllipse(Brushes.Red, 9, 4, 3, 3);
-                            g.FillEllipse(Brushes.Red, 4, 9, 3, 3);
-                            g.FillEllipse(Brushes.Red, 9, 9, 3, 3);
+                            g.FillEllipse(Brushes.Red, 4, 4, 2, 2);
+                            g.FillEllipse(Brushes.Red, 9, 4, 2, 2);
+                            g.FillEllipse(Brushes.Red, 4, 9, 2, 2);
+                            g.FillEllipse(Brushes.Red, 9, 9, 2, 2);
                         }
                     }
                     using (var ms = new MemoryStream())

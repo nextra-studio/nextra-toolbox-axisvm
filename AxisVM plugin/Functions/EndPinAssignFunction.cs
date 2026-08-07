@@ -4,6 +4,54 @@ using System.Windows.Forms;
 using AxisVM;
 using AxisVM_plugin.UI;
 
+/* 
+ * =====================================================================================
+ * END PIN ASSIGN ADDON - LOGIC DOCUMENTATION
+ * =====================================================================================
+ * 
+ * This addon automatically assigns structural pins (hinges or semi-rigid connections) 
+ * to the true "free ends" of a continuous chain of selected lines.
+ * 
+ * CORE LOGIC WORKFLOW:
+ * 1. SELECTION & DATA GATHERING:
+ *    - The script identifies all user-selected lines.
+ *    - It fetches the node coordinates (Node1, Node2) for each selected line.
+ *    - It builds a map of which nodes belong to which lines.
+ * 
+ * 2. CONTINUITY CHECK & CHAIN BUILDING (IsContinuousStrict):
+ *    - To determine if two lines meeting at a node should be considered "continuous" (acting as a single beam),
+ *      the script calculates the 3D vectors of the two lines pointing outwards from the shared node.
+ *    - It calculates the interior angle between these two lines (0 to 180 degrees).
+ *    - SMALLER ANGLE COMPARISON: The user defines an "Angle Tolerance" (e.g., 90 degrees).
+ *      The script calculates the "smaller angle" of the bend: Math.Min(angle, 180 - angle).
+ *      If this smaller angle is LESS THAN OR EQUAL to the tolerance, the lines are considered continuous.
+ *      (e.g., if Tolerance = 90, then straight lines (0° bend), right angles (90° bend), and sharp 
+ *      acute corners like 60° (smaller angle = 60°) are ALL considered continuous).
+ *    - Lines that are continuous are grouped into a "Chain" using a breadth-first search (Queue).
+ * 
+ * 3. IDENTIFYING FREE ENDS (Within the Selection):
+ *    - Once the chains are built purely from the selected lines, the script counts how many times 
+ *      each node appears within that specific chain.
+ *    - If a node appears exactly ONCE in the chain, it means it is a "free end" of that selected chain.
+ * 
+ * 4. MODEL CONTINUITY CHECK (Unselected Lines Filter):
+ *    - If the user checked "Check continuity against unselected lines":
+ *      The script iterates through the entire structural model to see if any of these "free ends" 
+ *      connect to an UNSELECTED line in the model.
+ *    - If a free end connects to an unselected line AND they are continuous (based on the same angle logic),
+ *      then this node is NOT truly a free end! It is just a segment boundary in a larger continuous beam.
+ *      The script removes this node from the list of valid free ends.
+ * 
+ * 5. APPLYING PINS:
+ *    - The remaining valid free ends are sorted spatially (by Z, then X, then Y) to determine 
+ *      the "Start" and "End" node of the chain.
+ *    - Based on the user's UI choice (Both Ends, Start Node Only, End Node Only), it identifies 
+ *      which of the free ends should receive the pin.
+ *    - It applies a complete hinge (yy, zz, and optionally xx torsion) or a semi-rigid spring 
+ *      to those specific ends, without overwriting existing translational releases.
+ * =====================================================================================
+ */
+
 namespace AxisVM_plugin.Functions
 {
     internal struct Coord : IEquatable<Coord>

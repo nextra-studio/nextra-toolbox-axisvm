@@ -57,7 +57,7 @@ namespace AxisVM_plugin.Addons
                     {
                         g.Clear(Color.Magenta); // Transparent color
                         
-                        using (var pen = new Pen(Color.DarkBlue, 2))
+                        using (var pen = new Pen(Color.DarkBlue, 1))
                         {
                             // Draw an arrow pointing down from a block
                             g.FillRectangle(Brushes.DarkGray, 2, 1, 12, 3);
