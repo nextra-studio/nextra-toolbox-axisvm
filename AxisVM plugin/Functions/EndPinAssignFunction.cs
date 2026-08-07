@@ -70,6 +70,129 @@ namespace AxisVM_plugin.Functions
                                 nodeCounts[c2].Add(lineId);
                             }
 
+                            // Find all line IDs we need to consider. 
+                            // If user selected 1 line, we automatically find all lines connected to its nodes
+                            // to determine continuity.
+                            List<int> linesToProcess = new List<int>();
+                            for (int i = 1; i <= lineDataArr.Length; i++)
+                            {
+                                linesToProcess.Add((int)selectedLines.GetValue(i));
+                            }
+
+                            if (selectedLines.Length == 1)
+                            {
+                                int selId = linesToProcess[0];
+                                Coord c1 = lineStartCoords[selId];
+                                Coord c2 = lineEndCoords[selId];
+                                
+                                // To find connected lines efficiently, we will just scan a reasonable range of IDs
+                                // until we find enough lines, or just scan 1 to Count*5
+                                int found = 0;
+                                int target = model.Lines.Count;
+                                for (int i = 1; i <= target * 5; i++)
+                                {
+                                    try
+                                    {
+                                        if (i == selId) { found++; continue; }
+                                        var testLine = model.Lines.Item[i];
+                                        if (testLine != null)
+                                        {
+                                            found++;
+                                            // Get its nodes
+                                            AxisVM.RNode tn1 = new AxisVM.RNode();
+                                            AxisVM.RNode tn2 = new AxisVM.RNode();
+                                            // To get line data safely without slow COM exception, we can just use GetLineData
+                                            // But since we just need nodes, we can use the BulkGetLineData logic for a batch, 
+                                            // or just GetLineData one by one.
+                                        }
+                                        if (found >= target) break;
+                                    }
+                                    catch { }
+                                }
+                            }
+                            
+                            // To make this perfectly robust and fast, let's just use the selected lines for the chain graph,
+                            // BUT if selectedLines.Length == 1, we will specifically search the model for lines sharing its nodes.
+                            if (selectedLines.Length == 1)
+                            {
+                                int selId = linesToProcess[0];
+                                AxisVM.RNode n1 = new AxisVM.RNode(); model.Nodes.GetNode(lineDataMap[selId].NodeId1, ref n1);
+                                AxisVM.RNode n2 = new AxisVM.RNode(); model.Nodes.GetNode(lineDataMap[selId].NodeId2, ref n2);
+                                
+                                // Let's just find lines connected to NodeId1 or NodeId2
+                                // We can do this by iterating all members, which is usually smaller and faster
+                                for (int i = 1; i <= model.Members.Count * 2; i++)
+                                {
+                                    try
+                                    {
+                                        var mem = model.Members.Item[i];
+                                        if (mem != null)
+                                        {
+                                            Array mLines;
+                                            mem.GetLines(out mLines);
+                                            if (mLines != null)
+                                            {
+                                                for (int j = 1; j <= mLines.Length; j++)
+                                                {
+                                                    int mLineId = (int)mLines.GetValue(j);
+                                                    if (!linesToProcess.Contains(mLineId))
+                                                    {
+                                                        System.Array ids = System.Array.CreateInstance(typeof(int), new int[] { 1 }, new int[] { 1 });
+                                                        ids.SetValue(mLineId, 1);
+                                                        System.Array lData;
+                                                        model.Lines.BulkGetLineData(ids, out lData);
+                                                        if (lData != null && lData.Length > 0)
+                                                        {
+                                                            RLineData d = (RLineData)lData.GetValue(1);
+                                                            if (d.NodeId1 == lineDataMap[selId].NodeId1 || d.NodeId2 == lineDataMap[selId].NodeId1 ||
+                                                                d.NodeId1 == lineDataMap[selId].NodeId2 || d.NodeId2 == lineDataMap[selId].NodeId2)
+                                                            {
+                                                                linesToProcess.Add(mLineId);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    catch {}
+                                }
+
+                                // Now re-populate lineDataMap, lineStartCoords, lineEndCoords, nodeCounts with ALL linesToProcess
+                                System.Array allIds = System.Array.CreateInstance(typeof(int), new int[] { linesToProcess.Count }, new int[] { 1 });
+                                for (int i = 0; i < linesToProcess.Count; i++) allIds.SetValue(linesToProcess[i], i + 1);
+                                
+                                model.Lines.BulkGetLineData(allIds, out lineDataArr);
+                                
+                                lineDataMap.Clear();
+                                lineStartCoords.Clear();
+                                lineEndCoords.Clear();
+                                nodeCounts.Clear();
+
+                                for (int i = 1; i <= lineDataArr.Length; i++)
+                                {
+                                    int lineId = (int)allIds.GetValue(i);
+                                    RLineData lineData = (RLineData)lineDataArr.GetValue(i);
+                                    lineDataMap[lineId] = lineData;
+                                    
+                                    AxisVM.RNode t1 = new AxisVM.RNode();
+                                    model.Nodes.GetNode(lineData.NodeId1, ref t1);
+                                    Coord c1 = new Coord(t1.x, t1.y, t1.z);
+                                    lineStartCoords[lineId] = c1;
+
+                                    AxisVM.RNode t2 = new AxisVM.RNode();
+                                    model.Nodes.GetNode(lineData.NodeId2, ref t2);
+                                    Coord c2 = new Coord(t2.x, t2.y, t2.z);
+                                    lineEndCoords[lineId] = c2;
+
+                                    if (!nodeCounts.ContainsKey(c1)) nodeCounts[c1] = new List<int>();
+                                    if (!nodeCounts.ContainsKey(c2)) nodeCounts[c2] = new List<int>();
+
+                                    nodeCounts[c1].Add(lineId);
+                                    nodeCounts[c2].Add(lineId);
+                                }
+                            }
+
                             // Build strictly continuous chains based on Angle Tolerance
                             Dictionary<int, int> lineToChainMap = new Dictionary<int, int>();
                             int currentChain = 0;
@@ -122,9 +245,9 @@ namespace AxisVM_plugin.Functions
                             // Re-build node counts but STRICTLY PER CHAIN
                             Dictionary<int, Dictionary<Coord, int>> chainNodeCounts = new Dictionary<int, Dictionary<Coord, int>>();
                             
-                            for (int i = 1; i <= lineDataArr.Length; i++)
+                            for (int i = 1; i <= lineDataMap.Count; i++)
                             {
-                                int lineId = (int)selectedLines.GetValue(i);
+                                int lineId = linesToProcess[i - 1];
                                 int chainId = lineToChainMap[lineId];
                                 Coord c1 = lineStartCoords[lineId];
                                 Coord c2 = lineEndCoords[lineId];
@@ -138,9 +261,10 @@ namespace AxisVM_plugin.Functions
                                 chainNodeCounts[chainId][c2]++;
                             }
 
-                            for (int i = 1; i <= lineDataArr.Length; i++)
+                            for (int i = 1; i <= lineDataMap.Count; i++)
                             {
-                                int lineId = (int)selectedLines.GetValue(i);
+                                // We iterate over linesToProcess instead of selectedLines
+                                int lineId = linesToProcess[i - 1];
                                 int chainId = lineToChainMap[lineId];
                                 Coord c1 = lineStartCoords[lineId];
                                 Coord c2 = lineEndCoords[lineId];
@@ -165,7 +289,7 @@ namespace AxisVM_plugin.Functions
 
                             HashSet<int> chainTorsionReleased = new HashSet<int>();
 
-                            for (int i = 1; i <= lineDataArr.Length; i++)
+                            for (int i = 1; i <= selectedLines.Length; i++)
                             {
                                 int lineId = (int)selectedLines.GetValue(i);
                                 Coord c1 = lineStartCoords[lineId];
@@ -315,7 +439,9 @@ namespace AxisVM_plugin.Functions
             double angleRad = Math.Acos(dot);
             double angleDeg = angleRad * 180.0 / Math.PI;
             
-            if (angleDeg >= angleTolerance - 1e-5)
+            double deviation = Math.Abs(180.0 - angleDeg);
+            
+            if (deviation <= angleTolerance + 1e-5)
             {
                 return true;
             }
