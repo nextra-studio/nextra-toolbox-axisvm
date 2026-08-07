@@ -14,12 +14,14 @@ namespace AxisVM_plugin.UI
     public class EndPinAssignForm : Form
     {
         public bool ReleaseTorsion { get; private set; }
+        public bool CheckModelContinuity { get; private set; }
         public bool IsSemiRigid { get; private set; }
         public double Stiffness { get; private set; }
         public PinTarget Target { get; private set; }
         public double AngleTolerance { get; private set; }
 
         private CheckBox chkReleaseTorsion;
+        private CheckBox chkModelContinuity;
         private ComboBox cmbPinType;
         private ComboBox cmbPinTarget;
         private TextBox txtAngleTolerance;
@@ -50,10 +52,17 @@ namespace AxisVM_plugin.UI
             chkReleaseTorsion.AutoSize = true;
             this.Controls.Add(chkReleaseTorsion);
 
+            // Check Model Continuity Checkbox
+            chkModelContinuity = new CheckBox();
+            chkModelContinuity.Text = "Check continuity against unselected lines";
+            chkModelContinuity.Location = new Point(20, 40);
+            chkModelContinuity.AutoSize = true;
+            this.Controls.Add(chkModelContinuity);
+
             // Pin Type Label & ComboBox
             Label lblPinType = new Label();
             lblPinType.Text = "Pin Type:";
-            lblPinType.Location = new Point(20, 60);
+            lblPinType.Location = new Point(20, 70);
             lblPinType.AutoSize = true;
             this.Controls.Add(lblPinType);
 
@@ -61,7 +70,7 @@ namespace AxisVM_plugin.UI
             cmbPinType.DropDownStyle = ComboBoxStyle.DropDownList;
             cmbPinType.Items.AddRange(new string[] { "Complete Pin", "Semi-rigid Pin" });
             cmbPinType.SelectedIndex = 0;
-            cmbPinType.Location = new Point(130, 57);
+            cmbPinType.Location = new Point(130, 67);
             cmbPinType.Size = new Size(200, 21);
             cmbPinType.SelectedIndexChanged += CmbPinType_SelectedIndexChanged;
             this.Controls.Add(cmbPinType);
@@ -69,7 +78,7 @@ namespace AxisVM_plugin.UI
             // Pin Target Label & ComboBox
             Label lblPinTarget = new Label();
             lblPinTarget.Text = "Apply To:";
-            lblPinTarget.Location = new Point(20, 100);
+            lblPinTarget.Location = new Point(20, 110);
             lblPinTarget.AutoSize = true;
             this.Controls.Add(lblPinTarget);
 
@@ -81,7 +90,7 @@ namespace AxisVM_plugin.UI
                 "Chain: End Node Only"
             });
             cmbPinTarget.SelectedIndex = 0;
-            cmbPinTarget.Location = new Point(130, 97);
+            cmbPinTarget.Location = new Point(130, 107);
             cmbPinTarget.Size = new Size(200, 21);
             cmbPinTarget.SelectedIndexChanged += CmbPinTarget_SelectedIndexChanged;
             this.Controls.Add(cmbPinTarget);
@@ -89,27 +98,27 @@ namespace AxisVM_plugin.UI
             // Angle Tolerance Label & TextBox
             lblAngleTolerance = new Label();
             lblAngleTolerance.Text = "Angle Tol (deg):";
-            lblAngleTolerance.Location = new Point(20, 140);
+            lblAngleTolerance.Location = new Point(20, 150);
             lblAngleTolerance.AutoSize = true;
             this.Controls.Add(lblAngleTolerance);
 
             txtAngleTolerance = new TextBox();
             txtAngleTolerance.Text = "15.0";
-            txtAngleTolerance.Location = new Point(160, 137);
+            txtAngleTolerance.Location = new Point(160, 147);
             txtAngleTolerance.Size = new Size(120, 20);
             this.Controls.Add(txtAngleTolerance);
 
             // Stiffness Label & TextBox
             lblStiffness = new Label();
             lblStiffness.Text = "Stiffness (kNm/rad):";
-            lblStiffness.Location = new Point(20, 180);
+            lblStiffness.Location = new Point(20, 190);
             lblStiffness.AutoSize = true;
             lblStiffness.Visible = false;
             this.Controls.Add(lblStiffness);
 
             txtStiffness = new TextBox();
             txtStiffness.Text = "1.0";
-            txtStiffness.Location = new Point(160, 177);
+            txtStiffness.Location = new Point(160, 187);
             txtStiffness.Size = new Size(120, 20);
             txtStiffness.Visible = false;
             this.Controls.Add(txtStiffness);
@@ -118,14 +127,14 @@ namespace AxisVM_plugin.UI
             btnOk = new Button();
             btnOk.Text = "OK";
             btnOk.DialogResult = DialogResult.OK;
-            btnOk.Location = new Point(140, 230);
+            btnOk.Location = new Point(140, 240);
             btnOk.Click += BtnOk_Click;
             this.Controls.Add(btnOk);
 
             btnCancel = new Button();
             btnCancel.Text = "Cancel";
             btnCancel.DialogResult = DialogResult.Cancel;
-            btnCancel.Location = new Point(225, 230);
+            btnCancel.Location = new Point(225, 240);
             this.Controls.Add(btnCancel);
 
             this.AcceptButton = btnOk;
@@ -149,6 +158,7 @@ namespace AxisVM_plugin.UI
         private void BtnOk_Click(object sender, EventArgs e)
         {
             ReleaseTorsion = chkReleaseTorsion.Checked;
+            CheckModelContinuity = chkModelContinuity.Checked;
             IsSemiRigid = cmbPinType.SelectedIndex == 1;
             Target = (PinTarget)cmbPinTarget.SelectedIndex;
 
