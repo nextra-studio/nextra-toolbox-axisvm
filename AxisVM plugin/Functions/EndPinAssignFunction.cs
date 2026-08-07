@@ -439,9 +439,9 @@ namespace AxisVM_plugin.Functions
             double angleRad = Math.Acos(dot);
             double angleDeg = angleRad * 180.0 / Math.PI;
             
-            double deviation = Math.Abs(180.0 - angleDeg);
+            double smallerAngle = Math.Min(angleDeg, 180.0 - angleDeg);
             
-            if (deviation <= angleTolerance + 1e-5)
+            if (smallerAngle <= angleTolerance + 1e-5)
             {
                 return true;
             }
