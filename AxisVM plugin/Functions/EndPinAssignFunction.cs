@@ -210,13 +210,61 @@ namespace AxisVM_plugin.Functions
 
                             foreach (var kvp in chainFreeEnds)
                             {
-                                kvp.Value.Sort((a, b) => {
-                                    int zCmp = a.Z.CompareTo(b.Z);
-                                    if (zCmp != 0) return zCmp;
-                                    int xCmp = a.X.CompareTo(b.X);
-                                    if (xCmp != 0) return xCmp;
-                                    return a.Y.CompareTo(b.Y);
-                                });
+                                int cId = kvp.Key;
+                                List<Coord> ends = kvp.Value;
+                                
+                                if (ends.Count == 2)
+                                {
+                                    Coord f1 = ends[0];
+                                    Coord f2 = ends[1];
+                                    
+                                    List<int> chainLineIds = new List<int>();
+                                    foreach (int lId in linesToProcess)
+                                    {
+                                        if (lineToChainMap[lId] == cId) chainLineIds.Add(lId);
+                                    }
+                                    
+                                    int forward = 0;
+                                    int backward = 0;
+                                    Coord current = f1;
+                                    HashSet<int> visited = new HashSet<int>();
+                                    
+                                    while (!current.Equals(f2))
+                                    {
+                                        int nextLine = -1;
+                                        foreach (int lId in chainLineIds)
+                                        {
+                                            if (!visited.Contains(lId) && 
+                                                (lineStartCoords[lId].Equals(current) || lineEndCoords[lId].Equals(current)))
+                                            {
+                                                nextLine = lId;
+                                                break;
+                                            }
+                                        }
+                                        
+                                        if (nextLine == -1) break; // Should not happen in a simple chain
+                                        visited.Add(nextLine);
+                                        
+                                        if (lineStartCoords[nextLine].Equals(current))
+                                        {
+                                            forward++;
+                                            current = lineEndCoords[nextLine];
+                                        }
+                                        else
+                                        {
+                                            backward++;
+                                            current = lineStartCoords[nextLine];
+                                        }
+                                    }
+                                    
+                                    // If the majority of local x-axes point opposite to our trace direction (f1->f2),
+                                    // then f2 is the true logical "Start" of the chain, and f1 is the "End".
+                                    if (backward > forward)
+                                    {
+                                        ends[0] = f2;
+                                        ends[1] = f1;
+                                    }
+                                }
                             }
 
                             if (form.CheckModelContinuity)
