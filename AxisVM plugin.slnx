@@ -1,3 +1,8 @@
 <Solution>
-  <Project Path="AxisVM plugin/AxisVM plugin.csproj" />
+  <Project Path="AxisVM plugin/EndPinAssignAddon.csproj" />
+  <Project Path="AxisVM plugin/ReactionTransferAddon.csproj" />
+  <Project Path="AxisVM plugin/SectionModifierAddon.csproj" />
+  <Project Path="AxisVM plugin/StudsWallAddon.csproj" />
+  <Project Path="AxisVM plugin/OneWayLoadPanelAddon.csproj" />
+  <Project Path="AxisVM plugin/ConcreteDesignAddon.csproj" />
 </Solution>
