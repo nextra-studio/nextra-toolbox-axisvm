@@ -70,11 +70,9 @@ The One Way Load Panel Addon automates the generation and configuration of one-w
 - `UI/OneWayLoadPanelForm.cs`: span direction / spacing / tolerance dialog.
 - `Functions/OneWayLoadPanelLogic.cs`: selection + dialog + summary for the line-based workflow (`Execute`).
 - `Functions/OneWayPanelBuilder.cs`: **shared** geometry engine — edge classification, panel
-  creation, the edge-strip split (`GeneratePanels`, `OneWayPanelOptions`). Compiled into both addons.
+  creation, the edge-strip split (`GeneratePanels`, `OneWayPanelOptions`). Compiled into the line-based addon and Rhino import.
 - `Functions/EdgeChainBuilder.cs`: **shared** — reconstructs subdivided boundary sides into logical
   polyline edges.
-- The "Convert Load Panel" addon (`ConvertLoadPanelOneWayAddon.csproj`) is a separate DLL that
-  reuses `OneWayPanelBuilder` / `EdgeChainBuilder` — see `ConvertLoadPanelOneWayAddon.md`.
 
 ## Validation and failure handling (2026-10-14 refactor)
 - Numeric inputs accept the current locale's decimal separator and an invariant decimal point,
@@ -89,9 +87,6 @@ The One Way Load Panel Addon automates the generation and configuration of one-w
 - Cleanup is centralized and runs on both normal failure returns and exceptions. Cleanup failures
   are reported rather than silently ignored. This is not a full model transaction: successful beam
   splits remain after an unsuccessful spaced attempt.
-- The shared conversion workflow validates before deleting an existing panel, receives surviving
-  boundary UIDs even on exceptions, and attempts to restore its contour and captured loads.
-  A failed restoration is reported explicitly.
 
 ## Regression checks
 `Checks/OneWayPanelChecks.csproj` compiles the production builder and edge-chain code against an

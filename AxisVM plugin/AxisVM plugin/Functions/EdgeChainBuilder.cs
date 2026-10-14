@@ -8,7 +8,7 @@ namespace AxisVM_plugin.Functions
     /// A resolved line segment: its model index plus its two endpoint node indexes.
     /// The node indexes are read straight from IAxisVMLine.StartNode / EndNode (see
     /// OneWayLoadPanelLogic for why the bulk path is avoided). Shared by
-    /// OneWayLoadPanelLogic and EdgeChainBuilder.
+    /// the one-way panel generator and Rhino import.
     /// </summary>
     internal struct ResolvedLine
     {
