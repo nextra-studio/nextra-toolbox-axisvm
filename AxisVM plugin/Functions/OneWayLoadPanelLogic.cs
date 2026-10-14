@@ -6,6 +6,15 @@ using AxisVM_plugin.UI;
 
 namespace AxisVM_plugin.Functions
 {
+    /// <summary>
+    /// Addon "N. Lines -> One-Way Panel": builds one-way load panel(s) from the boundary lines the
+    /// user has selected.
+    ///
+    /// This class only handles the selection, the dialog and the run summary. All of the geometry -
+    /// reconstructing subdivided sides, classifying support vs edge beams, creating the panels and
+    /// the edge-strip split - lives in <see cref="OneWayPanelBuilder"/>, which is shared with the
+    /// "Convert Load Panel" addon.
+    /// </summary>
     public class OneWayLoadPanelLogic
     {
         public static int Execute(IAxisVMApplication app)
@@ -15,46 +24,82 @@ namespace AxisVM_plugin.Functions
                 var model = app.Models.Item[1];
                 if (model == null) return -1;
 
+                Array selectedLines;
+                model.Lines.GetSelectedItemIds(out selectedLines);
+
+                if (selectedLines == null || selectedLines.Length == 0)
+                {
+                    MessageBox.Show("Please select lines to define the load panel boundary.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return 0;
+                }
+
                 using (OneWayLoadPanelForm form = new OneWayLoadPanelForm())
                 {
-                    if (form.ShowDialog() == DialogResult.OK)
+                    if (form.ShowDialog() != DialogResult.OK) return 1;
+
+                    OneWayPanelOptions opt = new OneWayPanelOptions
                     {
-                        model.BeginUpdate();
-                        try
-                        {
-                            // 1. Get selected lines or load panels
-                            // For this skeleton, we assume the user selected 4 boundary lines
-                            Array selectedLines;
-                            model.Lines.GetSelectedItemIds(out selectedLines);
+                        SpanningDirection = form.SpanningDirection,
+                        NoSpacing = form.NoSpacing,
+                        EdgeSpacingMm = form.EdgeSpacing,
+                        AngleToleranceDeg = form.AngleTolerance
+                    };
 
-                            if (selectedLines == null || selectedLines.Length != 4)
+                    // Resolve every selected line to its endpoint nodes.
+                    List<ResolvedLine> allSelected = new List<ResolvedLine>();
+                    foreach (int lineId in selectedLines)
+                    {
+                        allSelected.Add(OneWayPanelBuilder.ResolveLine(model, lineId));
+                    }
+
+                    List<List<ResolvedLine>> groups = OneWayPanelBuilder.GroupByConnectivity(allSelected);
+
+                    // Edge spacing splits lines, which renumbers every line index after the split
+                    // point. Remember each group by UID and re-resolve immediately before it is built.
+                    List<List<int>> groupUids = new List<List<int>>();
+                    foreach (List<ResolvedLine> group in groups)
+                    {
+                        List<int> uids = new List<int>(group.Count);
+                        foreach (ResolvedLine line in group) uids.Add(model.Lines.get_UID(line.LineId));
+                        groupUids.Add(uids);
+                    }
+
+                    int panelsCreated = 0;
+                    int boundariesDone = 0;
+                    List<string> notes = new List<string>();
+
+                    model.BeginUpdate();
+                    try
+                    {
+                        for (int g = 0; g < groupUids.Count; g++)
+                        {
+                            List<ResolvedLine> current = new List<ResolvedLine>(groupUids[g].Count);
+                            bool resolved = true;
+
+                            foreach (int uid in groupUids[g])
                             {
-                                MessageBox.Show("Please select exactly 4 lines to define the load panel boundary.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                                return 0;
+                                int lineId = model.Lines.get_IndexOfUID(uid);
+                                if (lineId <= 0) { resolved = false; break; }
+                                current.Add(OneWayPanelBuilder.ResolveLine(model, lineId));
                             }
 
-                            if (form.NoSpacing)
+                            if (!resolved || current.Count == 0)
                             {
-                                // Just create a single load panel or domain
-                                // This requires creating a domain from the 4 lines, then a load panel
-                                MessageBox.Show("No Spacing selected. Would create 1 one-way load panel here.");
+                                notes.Add(string.Format("Boundary {0}: skipped, its lines no longer exist in the model.", g + 1));
+                                continue;
                             }
-                            else
-                            {
-                                // Create 3 load panels based on edge spacing
-                                MessageBox.Show(string.Format("Spacing = {0}mm. Would create 3 separate load panels here.", form.EdgeSpacing));
-                            }
-                            
-                            // To actually create the Load Panel, you would:
-                            // 1. Create a Domain using model.Domains.Add(...)
-                            // 2. Call model.LoadPanels.AddFromDomain(domainId)
-                            // 3. Set the load panel properties (span direction, etc.)
-                        }
-                        finally
-                        {
-                            model.EndUpdate();
+
+                            int created = OneWayPanelBuilder.GeneratePanels(model, current, opt, g + 1, notes).Count;
+                            panelsCreated += created;
+                            if (created > 0) boundariesDone++;
                         }
                     }
+                    finally
+                    {
+                        model.EndUpdate();
+                    }
+
+                    ShowSummary(groups.Count, boundariesDone, panelsCreated, notes);
                 }
             }
             catch (Exception ex)
@@ -64,6 +109,25 @@ namespace AxisVM_plugin.Functions
             }
 
             return 1;
+        }
+
+        private static void ShowSummary(int boundaryCount, int boundariesDone, int panelsCreated, List<string> notes)
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            sb.AppendFormat("Created {0} load panel(s) from {1} of {2} selected boundary group(s).",
+                panelsCreated, boundariesDone, boundaryCount);
+
+            if (notes.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine();
+                int shown = Math.Min(notes.Count, 12);
+                for (int i = 0; i < shown; i++) sb.AppendLine(notes[i]);
+                if (notes.Count > shown) sb.AppendLine("... and " + (notes.Count - shown) + " more.");
+            }
+
+            MessageBox.Show(sb.ToString(), "One-Way Load Panel", MessageBoxButtons.OK,
+                boundariesDone == boundaryCount ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         }
     }
 }

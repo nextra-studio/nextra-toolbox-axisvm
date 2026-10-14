@@ -51,7 +51,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Addons\SectionModifierAddon.cs" />
-    <Compile Include="UI\SectionModifierForm.cs" />
+    <Compile Include="UI\SectionModifierForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Functions\SectionModifierFunction.cs" />
     <Compile Include="Core\AxisVMHelper.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

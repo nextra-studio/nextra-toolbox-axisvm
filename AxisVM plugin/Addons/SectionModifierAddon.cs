@@ -56,6 +56,8 @@ namespace AxisVM_plugin.Addons
                     using (var g = Graphics.FromImage(bmp))
                     {
                         g.Clear(Color.Magenta);
+                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+                        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.None;
                         
                         using (var pen = new Pen(Color.Blue, 1))
                         {

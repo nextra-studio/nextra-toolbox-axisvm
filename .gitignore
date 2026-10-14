@@ -42,3 +42,10 @@ _ReSharper*/
 
 # Auto-generated `scratch` directory for agent
 scratch/
+
+# Local tooling and generated calibration runs
+.claude/settings.local.json
+.venv*/
+__pycache__/
+*.py[cod]
+Checks/calibration/

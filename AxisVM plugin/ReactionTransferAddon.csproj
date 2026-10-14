@@ -51,7 +51,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Addons\ReactionTransferAddon.cs" />
-    <Compile Include="UI\ReactionTransferForm.cs" />
+    <Compile Include="UI\ReactionTransferForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Core\ReactionTransferLogic.cs" />
     <Compile Include="Functions\ReactionTransferFunction.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

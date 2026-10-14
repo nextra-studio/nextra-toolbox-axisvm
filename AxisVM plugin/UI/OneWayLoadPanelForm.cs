@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
+using AxisVM_plugin.Functions;
 
 namespace AxisVM_plugin.UI
 {
@@ -9,6 +10,7 @@ namespace AxisVM_plugin.UI
         public int SpanningDirection { get; private set; } // 0=Auto, 1=Dir1, 2=Dir2
         public bool NoSpacing { get; private set; }
         public double EdgeSpacing { get; private set; }
+        public double AngleTolerance { get; private set; }
 
         private RadioButton radAuto;
         private RadioButton radDir1;
@@ -16,6 +18,8 @@ namespace AxisVM_plugin.UI
         private CheckBox chkNoSpacing;
         private TextBox txtEdgeSpacing;
         private Label lblEdgeSpacing;
+        private TextBox txtAngleTolerance;
+        private Label lblAngleTolerance;
         private Button btnOk;
         private Button btnCancel;
         private PictureBox picPreview;
@@ -28,7 +32,7 @@ namespace AxisVM_plugin.UI
         private void InitializeComponent()
         {
             this.Text = "One-Way Load Panel";
-            this.Size = new Size(320, 360);
+            this.Size = new Size(320, 420);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
@@ -68,9 +72,22 @@ namespace AxisVM_plugin.UI
             txtEdgeSpacing.Size = new Size(100, 20);
             this.Controls.Add(txtEdgeSpacing);
 
+            // Angle Tolerance
+            lblAngleTolerance = new Label();
+            lblAngleTolerance.Text = "Angle Tol (deg):";
+            lblAngleTolerance.Location = new Point(20, 150);
+            lblAngleTolerance.AutoSize = true;
+            this.Controls.Add(lblAngleTolerance);
+
+            txtAngleTolerance = new TextBox();
+            txtAngleTolerance.Text = "15.0";
+            txtAngleTolerance.Location = new Point(140, 147);
+            txtAngleTolerance.Size = new Size(100, 20);
+            this.Controls.Add(txtAngleTolerance);
+
             // Preview Box
             picPreview = new PictureBox();
-            picPreview.Location = new Point(15, 155);
+            picPreview.Location = new Point(15, 185);
             picPreview.Size = new Size(270, 100);
             picPreview.BorderStyle = BorderStyle.FixedSingle;
             picPreview.Paint += PicPreview_Paint;
@@ -78,9 +95,9 @@ namespace AxisVM_plugin.UI
 
             // Buttons
             btnOk = new Button();
-            btnOk.Text = "Apply to 4 Lines";
+            btnOk.Text = "Apply";
             btnOk.DialogResult = DialogResult.OK;
-            btnOk.Location = new Point(15, 270);
+            btnOk.Location = new Point(15, 300);
             btnOk.Size = new Size(130, 30);
             btnOk.Click += BtnOk_Click;
             this.Controls.Add(btnOk);
@@ -88,7 +105,7 @@ namespace AxisVM_plugin.UI
             btnCancel = new Button();
             btnCancel.Text = "Cancel";
             btnCancel.DialogResult = DialogResult.Cancel;
-            btnCancel.Location = new Point(155, 270);
+            btnCancel.Location = new Point(155, 300);
             btnCancel.Size = new Size(130, 30);
             this.Controls.Add(btnCancel);
 
@@ -105,27 +122,30 @@ namespace AxisVM_plugin.UI
         private void PicPreview_Paint(object sender, PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
 
-            Pen border = new Pen(Color.Black, 2);
-            Pen loadLine = new Pen(Color.Blue, 2);
-            Pen loadArrow = new Pen(Color.Red, 2);
-            loadArrow.CustomEndCap = new System.Drawing.Drawing2D.AdjustableArrowCap(4, 4);
-            loadArrow.CustomStartCap = new System.Drawing.Drawing2D.AdjustableArrowCap(4, 4);
-
-            Rectangle rect = new Rectangle(30, 20, 210, 60);
-            g.DrawRectangle(border, rect);
-
-            if (!chkNoSpacing.Checked)
+            using (Pen border = new Pen(Color.Black, 2))
+            using (Pen loadLine = new Pen(Color.Blue, 2))
+            using (Pen loadArrow = new Pen(Color.Red, 2))
+            using (var arrowCap = new System.Drawing.Drawing2D.AdjustableArrowCap(4, 4))
             {
-                g.DrawLine(loadLine, 60, 20, 60, 80);
-                g.DrawLine(loadLine, 210, 20, 210, 80);
-                // Center panel arrow
-                g.DrawLine(loadArrow, 135, 30, 135, 70);
-            }
-            else
-            {
-                g.DrawLine(loadArrow, 135, 30, 135, 70);
+                loadArrow.CustomEndCap = arrowCap;
+                loadArrow.CustomStartCap = arrowCap;
+
+                Rectangle rect = new Rectangle(30, 20, 210, 60);
+                g.DrawRectangle(border, rect);
+
+                if (!chkNoSpacing.Checked)
+                {
+                    g.DrawLine(loadLine, 60, 20, 60, 80);
+                    g.DrawLine(loadLine, 210, 20, 210, 80);
+                    // Center panel arrow
+                    g.DrawLine(loadArrow, 135, 30, 135, 70);
+                }
+                else
+                {
+                    g.DrawLine(loadArrow, 135, 30, 135, 70);
+                }
             }
         }
 
@@ -137,9 +157,9 @@ namespace AxisVM_plugin.UI
             if (!NoSpacing)
             {
                 double s;
-                if (!double.TryParse(txtEdgeSpacing.Text, out s) || s <= 0)
+                if (!OneWayPanelOptions.TryParseNumber(txtEdgeSpacing.Text, out s) || s <= 0.001)
                 {
-                    MessageBox.Show("Please enter a valid positive spacing value.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show("Please enter a finite spacing greater than 0.001 mm.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     this.DialogResult = DialogResult.None;
                     return;
                 }
@@ -149,6 +169,15 @@ namespace AxisVM_plugin.UI
             {
                 EdgeSpacing = 0;
             }
+            
+            double tol;
+            if (!OneWayPanelOptions.TryParseNumber(txtAngleTolerance.Text, out tol) || tol < 0 || tol >= 45)
+            {
+                MessageBox.Show("Please enter an angle tolerance from 0 up to, but below, 45 degrees.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.DialogResult = DialogResult.None;
+                return;
+            }
+            AngleTolerance = tol;
         }
     }
 }

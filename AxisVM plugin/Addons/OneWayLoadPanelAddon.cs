@@ -15,11 +15,11 @@ namespace AxisVM_plugin.Addons
         public int AxisVMMainFormHandle { get; set; }
         public int AxisVMApplicationHandle { get; set; }
 
-        public string Plugin_MenuItemText { get { return "N. One-Way Load Panel"; } }
+        public string Plugin_MenuItemText { get { return "N. Lines -> One-Way Panel"; } }
 
         public string Plugin_GetTranslatedMenuItemText(int PrgLang)
         {
-            return "N. One-Way Load Panel";
+            return "N. Lines -> One-Way Panel";
         }
 
         public int Plugin_IsMenuItemEnabled(object iAxisVMApp) { return 1; }
@@ -41,8 +41,8 @@ namespace AxisVM_plugin.Addons
         }
 
         // Addon methods (toolbar)
-        public string Addon_HintText { get { return "Create one-way load panels with edge beam logic"; } }
-        public string Addon_GetTranslatedHintText(int PrgLang) { return "N. One-Way Load Panel"; }
+        public string Addon_HintText { get { return "Create one-way load panels from selected boundary lines"; } }
+        public string Addon_GetTranslatedHintText(int PrgLang) { return "N. Lines -> One-Way Panel"; }
         public int Addon_IsItemEnabled(object iAxisVMApp) { return 1; }
         public int Addon_IsItemVisible(object iAxisVMApp) { return 1; }
         public int Addon_IsModalWindow { get { return 0; } }
@@ -56,6 +56,8 @@ namespace AxisVM_plugin.Addons
                     using (var g = Graphics.FromImage(bmp))
                     {
                         g.Clear(Color.Magenta); // Transparent color
+                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+                        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.None;
                         
                         using (var pen = new Pen(Color.Blue, 1))
                         {

@@ -1,4 +1,4 @@
----
+﻿---
 trigger: always_on
 ---
 
@@ -8,7 +8,7 @@ You can refer to these links below:
 https://axisvm.eu/docs/how-to-create-a-simple-plugin-for-axisvm/
 https://axisvm.eu/docs/creation-of-a-simple-model-using-axisvm-com-server/
 or 
-C:\Users\tatsu\OneDrive\Digitalization\axisvm plugin dev\plugin dev 01\AxisVM plugin\axisvm_com_17100.pdf
+docs\reference\axisvm_com_17100.pdf (relative to repo root)
 
 This is AI copilot with some tools, so you could refer to it as well if nessesary:
 "C:\Users\tatsu\OneDrive\Digitalization\nextra.axis\nextra.axis.master\backend\tool_handlers.py"

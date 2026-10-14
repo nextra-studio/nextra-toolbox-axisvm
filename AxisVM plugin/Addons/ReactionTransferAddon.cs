@@ -22,8 +22,8 @@ namespace AxisVM_plugin.Addons
             return "N. Reaction Transfer  (WIP)";
         }
 
-        public int Plugin_IsMenuItemEnabled(object iAxisVMApp) { return 0; }
-        public int Plugin_IsMenuItemVisible(object iAxisVMApp) { return 0; }
+        public int Plugin_IsMenuItemEnabled(object iAxisVMApp) { return 1; }
+        public int Plugin_IsMenuItemVisible(object iAxisVMApp) { return 1; }
         public int Plugin_IsModalWindow { get { return 0; } }
 
         public void Plugin_Init(object iAxisVMApp) { }
@@ -56,6 +56,8 @@ namespace AxisVM_plugin.Addons
                     using (var g = Graphics.FromImage(bmp))
                     {
                         g.Clear(Color.Magenta); // Transparent color
+                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+                        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.None;
                         
                         using (var pen = new Pen(Color.DarkBlue, 1))
                         {

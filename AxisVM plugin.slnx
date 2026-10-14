@@ -1,8 +1,11 @@
 <Solution>
-  <Project Path="AxisVM plugin/EndPinAssignAddon.csproj" />
-  <Project Path="AxisVM plugin/ReactionTransferAddon.csproj" />
-  <Project Path="AxisVM plugin/SectionModifierAddon.csproj" />
-  <Project Path="AxisVM plugin/StudsWallAddon.csproj" />
-  <Project Path="AxisVM plugin/OneWayLoadPanelAddon.csproj" />
-  <Project Path="AxisVM plugin/ConcreteDesignAddon.csproj" />
+  <Project Path="AxisVM plugin/ConnectionLoadExtractorAddon.csproj" Id="4c7a2e91-3b5d-4f8a-9e61-0d2c7b3a8f15" />
+  <Project Path="Checks/ConnectionLoadMathChecks.csproj" Id="8d3f6b2a-1c4e-4a7b-b5d9-6e2f0a9c1b37" />
+  <Project Path="AxisVM plugin/ConvertLoadPanelOneWayAddon.csproj" Id="7c4e1a90-6b2d-4e1f-9c3a-2f7b8d5e0a11" />
+  <Project Path="AxisVM plugin/EndPinAssignAddon.csproj" Id="b710d6ef-058c-4dbb-9760-0e8576fa579f" />
+  <Project Path="AxisVM plugin/LoadPanelToolsAddon.csproj" Id="7c4e1a93-2b65-4f1d-9c0a-3e5d8b2a6f41" />
+  <Project Path="AxisVM plugin/OneWayLoadPanelAddon.csproj" Id="1d2f1b1a-5477-4d93-9f93-b1b54b4b9f7b" />
+  <Project Path="AxisVM plugin/ReactionTransferAddon.csproj" Id="b710d6ef-058c-4dbb-9760-0e8576fa579e" />
+  <Project Path="AxisVM plugin/RhinoImportAddon.csproj" Id="9e4b8c1a-2d3f-4a5b-8c7e-1f2a3b4c5d6e" />
+  <Project Path="AxisVM plugin/SectionModifierAddon.csproj" Id="b710d6ef-058c-4dbb-9760-0e8576fa579b" />
 </Solution>

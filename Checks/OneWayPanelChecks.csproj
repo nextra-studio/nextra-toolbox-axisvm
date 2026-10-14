@@ -1,0 +1,16 @@
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <OutputPath>bin\OneWayPanelChecks\</OutputPath>
+    <AssemblyName>OneWayPanelChecks</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Compile Include="OneWayPanelChecks.cs" />
+    <Compile Include="..\AxisVM plugin\Functions\OneWayPanelBuilder.cs" />
+    <Compile Include="..\AxisVM plugin\Functions\EdgeChainBuilder.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

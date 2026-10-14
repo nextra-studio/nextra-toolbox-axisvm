@@ -51,8 +51,12 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Addons\OneWayLoadPanelAddon.cs" />
-    <Compile Include="UI\OneWayLoadPanelForm.cs" />
+    <Compile Include="UI\OneWayLoadPanelForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Functions\OneWayLoadPanelLogic.cs" />
+    <Compile Include="Functions\OneWayPanelBuilder.cs" />
+    <Compile Include="Functions\EdgeChainBuilder.cs" />
     <Compile Include="Core\AxisVMHelper.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

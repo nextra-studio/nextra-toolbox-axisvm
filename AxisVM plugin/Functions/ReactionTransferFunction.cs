@@ -25,56 +25,50 @@ namespace AxisVM_plugin.Functions
 
                 // Get the currently active model (Item[1] is typically the active model in the COM API)
                 IAxisVMModel currentModel = axisApp.Models.Item[1];
-                
+
                 // Open the user interface form to collect settings for the transfer
                 using (ReactionTransferForm form = new ReactionTransferForm())
                 {
-                    // ShowDialog blocks execution until the user clicks OK or Cancel
-                    if (form.ShowDialog() == DialogResult.OK)
+                    // ShowDialog blocks execution until the user clicks OK or Cancel.
+                    // The form validates the path and the tolerance itself, so by the time OK comes back
+                    // both are known good.
+                    if (form.ShowDialog() != DialogResult.OK) return 1;
+
+                    // Modifying an existing model rewrites a file the user already owns, so it is confirmed
+                    // once here rather than assumed. A timestamped backup is written either way.
+                    if (form.ModifyExistingFile)
                     {
-                        // Validate inputs: Ensure the user provided a file path for the target model
-                        if (string.IsNullOrWhiteSpace(form.txtFilePath.Text))
-                        {
-                            MessageBox.Show("Please specify a target file path.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                            return 0;
-                        }
+                        DialogResult go = MessageBox.Show(
+                            "The reactions will be added to this existing model:\n\n" + form.txtFilePath.Text +
+                            "\n\nA timestamped backup is written next to it first, and nothing in it is deleted." +
+                            "\n\nAxisVM will switch to the target model when this finishes. Continue?",
+                            "Modify Existing Model", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
 
-                        // Collect user settings from the form into a strongly-typed settings object
-                        ReactionTransferSettings settings = new ReactionTransferSettings
-                        {
-                            TargetFilePath = form.txtFilePath.Text, // Where to save or load the target file
-                            IsNewFile = form.rbNewFile.Checked,     // True if we are creating a brand new model
-                            
-                            TransferSelectedElements = true,
-                            TransferParts = false,
-                            
-                            TransferSupports = form.chkTransferSupports.Checked,
-                            TransferBottomBeams = true,
-                            TransferLoadCases = true,
-                            TransferLoadGroups = true,
-                            TransferLoadCombinations = true,
-                            
-                            MergeLoads = true,
-                            ReplaceLoads = false,
-                            
-                            ResultType = form.cbResultType.SelectedIndex, // 0 = Linear Static, 1 = NonLinear Static, 2 = Envelope
-                            
-                            ApplyAsNodePointLoads = form.rbNodePointLoads.Checked, // Apply reactions directly to nodes
-                            ApplyAsBeamPointLoads = form.rbBeamPointLoads.Checked, // Apply reactions as point loads on lines
-                            TidyUpLines = form.chkTidyUpLines.Checked              // Simplify collinear lines after transfer
-                        };
-
-                        // Execute the core business logic to perform the actual transfer
-                        bool success = ReactionTransferLogic.ExecuteTransfer(axisApp, currentModel, settings);
-                        
-                        // Notify the user if the transfer completed successfully
-                        if (success)
-                        {
-                            MessageBox.Show("Reaction transfer completed successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        }
+                        if (go != DialogResult.OK) return 1;
                     }
+
+                    // Collect user settings from the form into a strongly-typed settings object
+                    ReactionTransferSettings settings = new ReactionTransferSettings
+                    {
+                        TargetFilePath = form.txtFilePath.Text,
+
+                        ModifyExistingFile = form.ModifyExistingFile,
+
+                        TransferSupports = form.chkTransferSupports.Checked,
+
+                        ResultType = form.cbResultType.SelectedIndex, // 0 = Linear Static, 1 = NonLinear Static, 2 = Envelope
+
+                        NodeMatchToleranceM = form.NodeMatchToleranceM,
+
+                        EnvelopeComponent = form.SelectedEnvelopeComponent,
+                        EnvelopeMinMax = form.SelectedEnvelopeMinMax
+                    };
+
+                    // Execute the core business logic. It reports its own outcome, including a
+                    // per-stage breakdown, so there is no follow-up dialog here.
+                    ReactionTransferLogic.ExecuteTransfer(axisApp, currentModel, settings);
                 }
-                
+
                 return 1; // Return 1 indicating successful execution
             }
             catch (Exception ex)

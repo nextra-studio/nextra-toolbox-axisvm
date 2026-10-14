@@ -1,23 +1,27 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Windows.Forms;
 using AxisVM;
 using AxisVM_plugin.UI;
 
-/* 
+/*
  * =====================================================================================
  * END PIN ASSIGN ADDON - LOGIC DOCUMENTATION
  * =====================================================================================
- * 
- * This addon automatically assigns structural pins (hinges or semi-rigid connections) 
+ *
+ * This addon automatically assigns structural pins (hinges or semi-rigid connections)
  * to the true "free ends" of a continuous chain of selected lines.
- * 
+ *
  * CORE LOGIC WORKFLOW:
  * 1. SELECTION & DATA GATHERING:
  *    - The script identifies all user-selected lines.
- *    - It fetches the node coordinates (Node1, Node2) for each selected line.
+ *    - For each line it reads IAxisVMLine.StartNode / EndNode. Those two properties are defined as
+ *      "the node at the start / end of the local x axis", so they - unlike BulkGetLineData's
+ *      NodeId1/NodeId2 - are guaranteed to reflect the line's actual local direction, which is
+ *      exactly what SetStartReleases / SetEndReleases act on.
  *    - It builds a map of which nodes belong to which lines.
- * 
+ *
  * 2. CONTINUITY CHECK & CHAIN BUILDING (IsContinuousStrict):
  *    - To determine if two lines meeting at a node should be considered "continuous" (acting as a single beam),
  *      the script calculates the 3D vectors of the two lines pointing outwards from the shared node.
@@ -25,29 +29,45 @@ using AxisVM_plugin.UI;
  *    - SMALLER ANGLE COMPARISON: The user defines an "Angle Tolerance" (e.g., 90 degrees).
  *      The script calculates the "smaller angle" of the bend: Math.Min(angle, 180 - angle).
  *      If this smaller angle is LESS THAN OR EQUAL to the tolerance, the lines are considered continuous.
- *      (e.g., if Tolerance = 90, then straight lines (0° bend), right angles (90° bend), and sharp 
- *      acute corners like 60° (smaller angle = 60°) are ALL considered continuous).
+ *      (e.g., if Tolerance = 90, then straight lines (0 deg bend), right angles (90 deg bend), and sharp
+ *      acute corners like 60 deg (smaller angle = 60 deg) are ALL considered continuous).
  *    - Lines that are continuous are grouped into a "Chain" using a breadth-first search (Queue).
- * 
+ *
  * 3. IDENTIFYING FREE ENDS (Within the Selection):
- *    - Once the chains are built purely from the selected lines, the script counts how many times 
+ *    - Once the chains are built purely from the selected lines, the script counts how many times
  *      each node appears within that specific chain.
  *    - If a node appears exactly ONCE in the chain, it means it is a "free end" of that selected chain.
- * 
- * 4. MODEL CONTINUITY CHECK (Unselected Lines Filter):
+ *
+ * 4. DIRECTION NORMALISATION (NormaliseChainDirections):
+ *    - The chain is traced end-to-end from one free end to the other. With "Auto-orient chain" ticked
+ *      (the default) every line is then re-oriented so that its local x axis points the same way along
+ *      that trace. Unticking it keeps the trace - and therefore the chain's Start / End - but leaves the
+ *      lines' local axes as drawn.
+ *    - The trace direction is chosen by majority vote: whichever of the two possible directions already
+ *      matches most of the lines wins, so the smallest possible number of lines is touched.
+ *    - Re-orientation is done through IAxisVMLines.BulkGetAttr_V161 / BulkSetAttr_V161 by writing
+ *      RLineAttr_V161.LocalXOrientation (mlxo_ij / mlxo_ji). That flips only the local x axis; it does
+ *      not renumber nodes, split the line, or move it, and the releases stay attached to the same
+ *      physical node (in that record they are stored against the lower/higher node index, not local x).
+ *    - THIS IS WHY IT MATTERS: without it, a chain whose lines were drawn in mixed directions had no
+ *      well-defined "Start" and "End", so "Chain: Start Node Only" landed on an arbitrary end and the
+ *      per-line start/end release assignment could not be reasoned about. After normalisation, the
+ *      chain's Start is the free end the trace begins at and the End is where it finishes.
+ *
+ * 5. MODEL CONTINUITY CHECK (Unselected Lines Filter):
  *    - If the user checked "Check continuity against unselected lines":
- *      The script iterates through the entire structural model to see if any of these "free ends" 
+ *      The script iterates through the entire structural model to see if any of these "free ends"
  *      connect to an UNSELECTED line in the model.
  *    - If a free end connects to an unselected line AND they are continuous (based on the same angle logic),
  *      then this node is NOT truly a free end! It is just a segment boundary in a larger continuous beam.
  *      The script removes this node from the list of valid free ends.
- * 
- * 5. APPLYING PINS:
- *    - The remaining valid free ends are sorted spatially (by Z, then X, then Y) to determine 
- *      the "Start" and "End" node of the chain.
- *    - Based on the user's UI choice (Both Ends, Start Node Only, End Node Only), it identifies 
+ *    - The filtered list only decides WHICH ends get a pin; the Start/End ordering still comes from the
+ *      normalised trace in step 4.
+ *
+ * 6. APPLYING PINS:
+ *    - Based on the user's UI choice (Both Ends, Start Node Only, End Node Only), it identifies
  *      which of the free ends should receive the pin.
- *    - It applies a complete hinge (yy, zz, and optionally xx torsion) or a semi-rigid spring 
+ *    - It applies a complete hinge (yy, zz, and optionally xx torsion) or a semi-rigid spring
  *      to those specific ends, without overwriting existing translational releases.
  * =====================================================================================
  */
@@ -56,14 +76,38 @@ namespace AxisVM_plugin.Functions
 {
     internal struct Coord : IEquatable<Coord>
     {
+        public int NodeId;
         public double X, Y, Z;
-        public Coord(double x, double y, double z) { X = Math.Round(x, 4); Y = Math.Round(y, 4); Z = Math.Round(z, 4); }
-        public bool Equals(Coord other) { return X == other.X && Y == other.Y && Z == other.Z; }
-        public override int GetHashCode() { return X.GetHashCode() ^ Y.GetHashCode() ^ Z.GetHashCode(); }
+        // Connectivity follows the model's node identity, even when separate nodes coincide.
+        // Keep full precision for the continuity angle and short members.
+        public Coord(int nodeId, double x, double y, double z) { NodeId = nodeId; X = x; Y = y; Z = z; }
+        public bool Equals(Coord other) { return NodeId == other.NodeId; }
+        public override bool Equals(object obj) { return obj is Coord && Equals((Coord)obj); }
+        public override int GetHashCode() { return NodeId.GetHashCode(); }
     }
 
     public class EndPinAssignFunction
     {
+        /// <summary>Everything known about one selected line, kept in local-x order.</summary>
+        private class LineInfo
+        {
+            public int LineId;
+            public int StartNodeId;   // node at the start of the local x axis
+            public int EndNodeId;     // node at the end of the local x axis
+            public Coord StartCoord;
+            public Coord EndCoord;
+            public bool CanTakeReleases; // only beams and ribs have end releases
+        }
+
+        /// <summary>A chain walked end-to-end, with the local direction each line currently has.</summary>
+        private class ChainTrace
+        {
+            public List<int> LineIds = new List<int>();
+            public List<bool> Forward = new List<bool>(); // true when the line's local x already points along the walk
+            public Coord Start;
+            public Coord End;
+        }
+
         public static int Execute(IAxisVMApplication app)
         {
             try
@@ -72,7 +116,8 @@ namespace AxisVM_plugin.Functions
                 if (model == null) return -1;
 
                 Array selectedLines;
-                model.Lines.GetSelectedItemIds(out selectedLines);
+                if (model.Lines.GetSelectedItemIds(out selectedLines) < 0)
+                    throw new InvalidOperationException("Could not read the selected lines.");
 
                 if (selectedLines == null || selectedLines.Length == 0)
                 {
@@ -82,363 +127,247 @@ namespace AxisVM_plugin.Functions
 
                 using (EndPinAssignForm form = new EndPinAssignForm())
                 {
-                    if (form.ShowDialog() == DialogResult.OK)
+                    if (form.ShowDialog() != DialogResult.OK) return 1;
+
+                    List<string> warnings = new List<string>();
+                    int chainCount = 0;
+                    int reorientedLines = 0;
+                    int pinnedEnds = 0;
+
+                    model.BeginUpdate();
+                    try
                     {
-                        model.BeginUpdate();
-                        try
+                        // ------------------------------------------------------------------
+                        // 1. Read the selection in local-x order
+                        // ------------------------------------------------------------------
+                        List<int> linesToProcess = new List<int>();
+                        Dictionary<int, LineInfo> lines = new Dictionary<int, LineInfo>();
+
+                        foreach (object selectedId in selectedLines)
                         {
-                            Array lineDataArr;
-                            model.Lines.BulkGetLineData(selectedLines, out lineDataArr);
-
-                            Dictionary<Coord, List<int>> nodeCounts = new Dictionary<Coord, List<int>>();
-                            Dictionary<int, RLineData> lineDataMap = new Dictionary<int, RLineData>();
-                            Dictionary<int, Coord> lineStartCoords = new Dictionary<int, Coord>();
-                            Dictionary<int, Coord> lineEndCoords = new Dictionary<int, Coord>();
-
-                            for (int i = 1; i <= lineDataArr.Length; i++)
+                            int lineId = Convert.ToInt32(selectedId);
+                            if (lines.ContainsKey(lineId)) continue;
+                            LineInfo info = ReadLine(model, lineId);
+                            if (info == null)
+                                throw new InvalidOperationException("Could not read selected line " + lineId + ". No releases were assigned.");
+                            if (!info.CanTakeReleases)
                             {
-                                int lineId = (int)selectedLines.GetValue(i);
-                                RLineData lineData = (RLineData)lineDataArr.GetValue(i);
-                                lineDataMap[lineId] = lineData;
-                                
-                                AxisVM.RNode n1 = new AxisVM.RNode();
-                                model.Nodes.GetNode(lineData.NodeId1, ref n1);
-                                Coord c1 = new Coord(n1.x, n1.y, n1.z);
-                                lineStartCoords[lineId] = c1;
-
-                                AxisVM.RNode n2 = new AxisVM.RNode();
-                                model.Nodes.GetNode(lineData.NodeId2, ref n2);
-                                Coord c2 = new Coord(n2.x, n2.y, n2.z);
-                                lineEndCoords[lineId] = c2;
-
-                                if (!nodeCounts.ContainsKey(c1)) nodeCounts[c1] = new List<int>();
-                                if (!nodeCounts.ContainsKey(c2)) nodeCounts[c2] = new List<int>();
-
-                                nodeCounts[c1].Add(lineId);
-                                nodeCounts[c2].Add(lineId);
+                                warnings.Add("Line " + lineId + " is not a beam or rib and was excluded from the chains.");
+                                continue;
                             }
-
-                            // Find all line IDs we need to consider. 
-                            List<int> linesToProcess = new List<int>();
-                            for (int i = 1; i <= lineDataArr.Length; i++)
-                            {
-                                linesToProcess.Add((int)selectedLines.GetValue(i));
-                            }
-
-                            // Build strictly continuous chains based on Angle Tolerance
-                            Dictionary<int, int> lineToChainMap = new Dictionary<int, int>();
-                            int currentChain = 0;
-                            foreach (int lId in lineDataMap.Keys)
-                            {
-                                if (lineToChainMap.ContainsKey(lId)) continue;
-                                
-                                Queue<int> q = new Queue<int>();
-                                q.Enqueue(lId);
-                                lineToChainMap[lId] = currentChain;
-                                
-                                while (q.Count > 0)
-                                {
-                                    int curr = q.Dequeue();
-                                    Coord c1 = lineStartCoords[curr];
-                                    Coord c2 = lineEndCoords[curr];
-                                    
-                                    // Check neighbors at c1
-                                    foreach (int neighbor in nodeCounts[c1])
-                                    {
-                                        if (neighbor != curr && !lineToChainMap.ContainsKey(neighbor))
-                                        {
-                                            // Only group if they are continuous within tolerance
-                                            if (IsContinuousStrict(curr, neighbor, c1, form.AngleTolerance, lineStartCoords, lineEndCoords))
-                                            {
-                                                lineToChainMap[neighbor] = currentChain;
-                                                q.Enqueue(neighbor);
-                                            }
-                                        }
-                                    }
-                                    // Check neighbors at c2
-                                    foreach (int neighbor in nodeCounts[c2])
-                                    {
-                                        if (neighbor != curr && !lineToChainMap.ContainsKey(neighbor))
-                                        {
-                                            if (IsContinuousStrict(curr, neighbor, c2, form.AngleTolerance, lineStartCoords, lineEndCoords))
-                                            {
-                                                lineToChainMap[neighbor] = currentChain;
-                                                q.Enqueue(neighbor);
-                                            }
-                                        }
-                                    }
-                                }
-                                currentChain++;
-                            }
-
-                            // Now identify the true "free ends" for each chain
-                            Dictionary<int, List<Coord>> chainFreeEnds = new Dictionary<int, List<Coord>>();
-                            
-                            // Re-build node counts but STRICTLY PER CHAIN
-                            Dictionary<int, Dictionary<Coord, int>> chainNodeCounts = new Dictionary<int, Dictionary<Coord, int>>();
-                            
-                            for (int i = 1; i <= lineDataMap.Count; i++)
-                            {
-                                int lineId = linesToProcess[i - 1];
-                                int chainId = lineToChainMap[lineId];
-                                Coord c1 = lineStartCoords[lineId];
-                                Coord c2 = lineEndCoords[lineId];
-                                
-                                if (!chainNodeCounts.ContainsKey(chainId)) chainNodeCounts[chainId] = new Dictionary<Coord, int>();
-                                
-                                if (!chainNodeCounts[chainId].ContainsKey(c1)) chainNodeCounts[chainId][c1] = 0;
-                                if (!chainNodeCounts[chainId].ContainsKey(c2)) chainNodeCounts[chainId][c2] = 0;
-                                
-                                chainNodeCounts[chainId][c1]++;
-                                chainNodeCounts[chainId][c2]++;
-                            }
-
-                            for (int i = 1; i <= lineDataMap.Count; i++)
-                            {
-                                // We iterate over linesToProcess instead of selectedLines
-                                int lineId = linesToProcess[i - 1];
-                                int chainId = lineToChainMap[lineId];
-                                Coord c1 = lineStartCoords[lineId];
-                                Coord c2 = lineEndCoords[lineId];
-                                
-                                if (!chainFreeEnds.ContainsKey(chainId)) chainFreeEnds[chainId] = new List<Coord>();
-                                
-                                // A node is a true free end of the chain if it appears exactly ONCE in the chain's lines
-                                if (chainNodeCounts[chainId][c1] == 1 && !chainFreeEnds[chainId].Contains(c1)) chainFreeEnds[chainId].Add(c1);
-                                if (chainNodeCounts[chainId][c2] == 1 && !chainFreeEnds[chainId].Contains(c2)) chainFreeEnds[chainId].Add(c2);
-                            }
-
-                            foreach (var kvp in chainFreeEnds)
-                            {
-                                int cId = kvp.Key;
-                                List<Coord> ends = kvp.Value;
-                                
-                                if (ends.Count == 2)
-                                {
-                                    Coord f1 = ends[0];
-                                    Coord f2 = ends[1];
-                                    
-                                    List<int> chainLineIds = new List<int>();
-                                    foreach (int lId in linesToProcess)
-                                    {
-                                        if (lineToChainMap[lId] == cId) chainLineIds.Add(lId);
-                                    }
-                                    
-                                    int forward = 0;
-                                    int backward = 0;
-                                    Coord current = f1;
-                                    HashSet<int> visited = new HashSet<int>();
-                                    
-                                    while (!current.Equals(f2))
-                                    {
-                                        int nextLine = -1;
-                                        foreach (int lId in chainLineIds)
-                                        {
-                                            if (!visited.Contains(lId) && 
-                                                (lineStartCoords[lId].Equals(current) || lineEndCoords[lId].Equals(current)))
-                                            {
-                                                nextLine = lId;
-                                                break;
-                                            }
-                                        }
-                                        
-                                        if (nextLine == -1) break; // Should not happen in a simple chain
-                                        visited.Add(nextLine);
-                                        
-                                        if (lineStartCoords[nextLine].Equals(current))
-                                        {
-                                            forward++;
-                                            current = lineEndCoords[nextLine];
-                                        }
-                                        else
-                                        {
-                                            backward++;
-                                            current = lineStartCoords[nextLine];
-                                        }
-                                    }
-                                    
-                                    // If the majority of local x-axes point opposite to our trace direction (f1->f2),
-                                    // then f2 is the true logical "Start" of the chain, and f1 is the "End".
-                                    if (backward > forward)
-                                    {
-                                        ends[0] = f2;
-                                        ends[1] = f1;
-                                    }
-                                }
-                            }
-
-                            if (form.CheckModelContinuity)
-                            {
-                                // Check if any free ends of the selected chains are continuous with UNSELECTED lines
-                                for (int cId = 0; cId < currentChain; cId++)
-                                {
-                                    if (!chainFreeEnds.ContainsKey(cId)) continue;
-                                    
-                                    List<Coord> validFreeEnds = new List<Coord>();
-                                    foreach (Coord c in chainFreeEnds[cId])
-                                    {
-                                        bool isTrulyFree = true;
-                                        
-                                        // Find which line in linesToProcess has node 'c' and belongs to cId
-                                        int chainLineId = -1;
-                                        foreach (int lId in linesToProcess)
-                                        {
-                                            if (lineToChainMap[lId] == cId && (lineStartCoords[lId].Equals(c) || lineEndCoords[lId].Equals(c)))
-                                            {
-                                                chainLineId = lId;
-                                                break;
-                                            }
-                                        }
-                                        
-                                        if (chainLineId != -1)
-                                        {
-                                            // Iterate all members
-                                            for (int i = 1; i <= model.Members.Count * 2; i++)
-                                            {
-                                                try
-                                                {
-                                                    var mem = model.Members.Item[i];
-                                                    if (mem != null)
-                                                    {
-                                                        Array mLines;
-                                                        mem.GetLines(out mLines);
-                                                        if (mLines != null)
-                                                        {
-                                                            for (int j = 1; j <= mLines.Length; j++)
-                                                            {
-                                                                int mLineId = (int)mLines.GetValue(j);
-                                                                if (!linesToProcess.Contains(mLineId))
-                                                                {
-                                                                    System.Array ids = System.Array.CreateInstance(typeof(int), new int[] { 1 }, new int[] { 1 });
-                                                                    ids.SetValue(mLineId, 1);
-                                                                    System.Array lData;
-                                                                    model.Lines.BulkGetLineData(ids, out lData);
-                                                                    if (lData != null && lData.Length > 0)
-                                                                    {
-                                                                        RLineData d = (RLineData)lData.GetValue(1);
-                                                                        
-                                                                        AxisVM.RNode t1 = new AxisVM.RNode(); model.Nodes.GetNode(d.NodeId1, ref t1);
-                                                                        Coord dc1 = new Coord(t1.x, t1.y, t1.z);
-                                                                        
-                                                                        AxisVM.RNode t2 = new AxisVM.RNode(); model.Nodes.GetNode(d.NodeId2, ref t2);
-                                                                        Coord dc2 = new Coord(t2.x, t2.y, t2.z);
-                                                                        
-                                                                        if (dc1.Equals(c) || dc2.Equals(c))
-                                                                        {
-                                                                            Dictionary<int, Coord> tempStart = new Dictionary<int, Coord>();
-                                                                            Dictionary<int, Coord> tempEnd = new Dictionary<int, Coord>();
-                                                                            tempStart[chainLineId] = lineStartCoords[chainLineId];
-                                                                            tempEnd[chainLineId] = lineEndCoords[chainLineId];
-                                                                            tempStart[mLineId] = dc1;
-                                                                            tempEnd[mLineId] = dc2;
-                                                                            
-                                                                            if (IsContinuousStrict(chainLineId, mLineId, c, form.AngleTolerance, tempStart, tempEnd))
-                                                                            {
-                                                                                isTrulyFree = false;
-                                                                                break;
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                catch {}
-                                                if (!isTrulyFree) break;
-                                            }
-                                        }
-                                        
-                                        if (isTrulyFree) validFreeEnds.Add(c);
-                                    }
-                                    
-                                    chainFreeEnds[cId] = validFreeEnds;
-                                }
-                            }
-
-                            HashSet<int> chainTorsionReleased = new HashSet<int>();
-
-                            for (int i = 1; i <= selectedLines.Length; i++)
-                            {
-                                int lineId = (int)selectedLines.GetValue(i);
-                                Coord c1 = lineStartCoords[lineId];
-                                Coord c2 = lineEndCoords[lineId];
-                                int chainId = lineToChainMap[lineId];
-
-                                bool isStartFree = false;
-                                bool isEndFree = false;
-
-                                List<Coord> freeEnds = chainFreeEnds.ContainsKey(chainId) ? chainFreeEnds[chainId] : new List<Coord>();
-                                Coord? chainStart = freeEnds.Count > 0 ? freeEnds[0] : (Coord?)null;
-                                Coord? chainEnd = freeEnds.Count > 1 ? freeEnds[freeEnds.Count - 1] : (Coord?)null;
-                                
-                                // A node is a true free end if it appears exactly ONCE in the chain's lines,
-                                // AND it wasn't filtered out by CheckModelContinuity
-                                bool c1Free = chainNodeCounts[chainId][c1] == 1 && freeEnds.Contains(c1);
-                                bool c2Free = chainNodeCounts[chainId][c2] == 1 && freeEnds.Contains(c2);
-
-                                if (form.Target == PinTarget.ChainBothEnds)
-                                {
-                                    isStartFree = c1Free;
-                                    isEndFree = c2Free;
-                                }
-                                else if (form.Target == PinTarget.ChainStartNode)
-                                {
-                                    isStartFree = c1Free && chainStart.HasValue && c1.Equals(chainStart.Value);
-                                    isEndFree = c2Free && chainStart.HasValue && c2.Equals(chainStart.Value);
-                                }
-                                else if (form.Target == PinTarget.ChainEndNode)
-                                {
-                                    isStartFree = c1Free && chainEnd.HasValue && c1.Equals(chainEnd.Value);
-                                    isEndFree = c2Free && chainEnd.HasValue && c2.Equals(chainEnd.Value);
-                                }
-
-                                if (isStartFree || isEndFree)
-                                {
-                                    var lineItem = model.Lines.Item[lineId];
-
-                                    bool applyTorsionStart = false;
-                                    bool applyTorsionEnd = false;
-                                    
-                                    if (form.ReleaseTorsion && isStartFree)
-                                    {
-                                        if (!chainTorsionReleased.Contains(chainId))
-                                        {
-                                            applyTorsionStart = true;
-                                            chainTorsionReleased.Add(chainId);
-                                        }
-                                    }
-                                    
-                                    if (form.ReleaseTorsion && isEndFree)
-                                    {
-                                        if (!chainTorsionReleased.Contains(chainId))
-                                        {
-                                            applyTorsionEnd = true;
-                                            chainTorsionReleased.Add(chainId);
-                                        }
-                                    }
-
-                                    // Fetch EXISTING releases so we do not overwrite the other end!
-                                    RReleases relStart = new RReleases();
-                                    RReleases relEnd = new RReleases();
-                                    lineItem.GetStartReleases(ref relStart);
-                                    lineItem.GetEndReleases(ref relEnd);
-
-                                    if (isStartFree) relStart = ModifyRelease(relStart, form, applyTorsionStart);
-                                    if (isEndFree) relEnd = ModifyRelease(relEnd, form, applyTorsionEnd);
-
-                                    if (isStartFree) lineItem.SetStartReleases(ref relStart);
-                                    if (isEndFree) lineItem.SetEndReleases(ref relEnd);
-                                }
-                            }
-                        }
-                        finally
-                        {
-                            model.EndUpdate();
+                            lines[lineId] = info;
+                            linesToProcess.Add(lineId);
                         }
 
-                        MessageBox.Show("End pins assigned successfully.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        // Stable ordering makes majority-vote ties independent of selection order.
+                        linesToProcess.Sort();
+
+                        if (lines.Count == 0)
+                        {
+                            MessageBox.Show("None of the selected lines could be read.", "End Pin Assign", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return 0;
+                        }
+
+                        // model node identity -> the selected beams/ribs touching it
+                        Dictionary<Coord, List<int>> linesAtNode = new Dictionary<Coord, List<int>>();
+                        foreach (int lineId in linesToProcess)
+                        {
+                            LineInfo info = lines[lineId];
+                            AddAt(linesAtNode, info.StartCoord, lineId);
+                            AddAt(linesAtNode, info.EndCoord, lineId);
+                        }
+
+                        // ------------------------------------------------------------------
+                        // 2. Build strictly continuous chains based on the angle tolerance
+                        // ------------------------------------------------------------------
+                        Dictionary<int, int> lineToChainMap = new Dictionary<int, int>();
+                        chainCount = 0;
+
+                        foreach (int lId in linesToProcess)
+                        {
+                            if (lineToChainMap.ContainsKey(lId)) continue;
+
+                            Queue<int> q = new Queue<int>();
+                            q.Enqueue(lId);
+                            lineToChainMap[lId] = chainCount;
+
+                            while (q.Count > 0)
+                            {
+                                int curr = q.Dequeue();
+                                foreach (Coord shared in new Coord[] { lines[curr].StartCoord, lines[curr].EndCoord })
+                                {
+                                    foreach (int neighbor in linesAtNode[shared])
+                                    {
+                                        if (neighbor == curr || lineToChainMap.ContainsKey(neighbor)) continue;
+                                        if (!IsContinuousStrict(lines[curr], lines[neighbor], shared, form.AngleTolerance)) continue;
+
+                                        lineToChainMap[neighbor] = chainCount;
+                                        q.Enqueue(neighbor);
+                                    }
+                                }
+                            }
+                            chainCount++;
+                        }
+
+                        // chainId -> its lines
+                        Dictionary<int, List<int>> chainLines = new Dictionary<int, List<int>>();
+                        foreach (int lineId in linesToProcess)
+                        {
+                            int chainId = lineToChainMap[lineId];
+                            if (!chainLines.ContainsKey(chainId)) chainLines[chainId] = new List<int>();
+                            chainLines[chainId].Add(lineId);
+                        }
+
+                        // ------------------------------------------------------------------
+                        // 3. Free ends: a node used exactly once inside its own chain
+                        // ------------------------------------------------------------------
+                        Dictionary<int, Dictionary<Coord, int>> chainNodeCounts = new Dictionary<int, Dictionary<Coord, int>>();
+                        Dictionary<int, List<Coord>> chainFreeEnds = new Dictionary<int, List<Coord>>();
+
+                        foreach (var kvp in chainLines)
+                        {
+                            Dictionary<Coord, int> counts = new Dictionary<Coord, int>();
+                            foreach (int lineId in kvp.Value)
+                            {
+                                Bump(counts, lines[lineId].StartCoord);
+                                Bump(counts, lines[lineId].EndCoord);
+                            }
+                            chainNodeCounts[kvp.Key] = counts;
+
+                            List<Coord> ends = new List<Coord>();
+                            foreach (int lineId in kvp.Value)
+                            {
+                                Coord c1 = lines[lineId].StartCoord;
+                                Coord c2 = lines[lineId].EndCoord;
+                                if (counts[c1] == 1 && !ends.Contains(c1)) ends.Add(c1);
+                                if (counts[c2] == 1 && !ends.Contains(c2)) ends.Add(c2);
+                            }
+                            chainFreeEnds[kvp.Key] = ends;
+                        }
+
+                        // ------------------------------------------------------------------
+                        // 4. Re-orient every chain so its lines all run the same way
+                        // ------------------------------------------------------------------
+                        HashSet<int> unorderedChains = new HashSet<int>();
+                        reorientedLines = NormaliseChainDirections(model, chainLines, chainFreeEnds, lines, warnings, form.AutoOrient, unorderedChains);
+
+                        // ------------------------------------------------------------------
+                        // 5. Drop free ends that continue into an unselected line
+                        // ------------------------------------------------------------------
+                        Dictionary<int, List<Coord>> chainValidEnds = new Dictionary<int, List<Coord>>();
+                        foreach (var kvp in chainFreeEnds)
+                        {
+                            chainValidEnds[kvp.Key] = form.CheckModelContinuity
+                                ? FilterAgainstUnselectedLines(model, kvp.Value, chainLines[kvp.Key], lines, linesToProcess, form.AngleTolerance, warnings)
+                                : new List<Coord>(kvp.Value);
+                        }
+
+                        // ------------------------------------------------------------------
+                        // 6. Apply the releases
+                        // ------------------------------------------------------------------
+                        HashSet<int> chainTorsionReleased = new HashSet<int>();
+                        // Respect torsion releases already present anywhere in the chain. Repeated runs
+                        // must not add a second torsion hinge simply because the target end changed.
+                        if (form.ReleaseTorsion)
+                        {
+                            foreach (int id in linesToProcess)
+                            {
+                                RReleases start = new RReleases(), end = new RReleases();
+                                var item = model.Lines.Item[id];
+                                if (item.GetStartReleases(ref start) <= 0 || item.GetEndReleases(ref end) <= 0)
+                                    throw new InvalidOperationException("Could not read existing releases on line " + id + ".");
+                                if (start.xx.ReleaseType != EReleaseType.rtRigid || end.xx.ReleaseType != EReleaseType.rtRigid)
+                                    chainTorsionReleased.Add(lineToChainMap[id]);
+                            }
+                        }
+
+                        foreach (int lineId in linesToProcess)
+                        {
+                            LineInfo info = lines[lineId];
+                            int chainId = lineToChainMap[lineId];
+
+                            // A branch has no unique chain Start/End. Both Ends can still pin its leaves.
+                            if (form.Target != PinTarget.ChainBothEnds && unorderedChains.Contains(chainId)) continue;
+                            List<Coord> ordered = chainFreeEnds[chainId];
+                            List<Coord> valid = chainValidEnds[chainId];
+
+                            Coord? chainStart = ordered.Count > 0 ? ordered[0] : (Coord?)null;
+                            Coord? chainEnd = ordered.Count > 1 ? ordered[ordered.Count - 1] : (Coord?)null;
+
+                            // A node earns a pin only if it is a free end of its chain AND survived the
+                            // continuity filter.
+                            bool c1Free = chainNodeCounts[chainId][info.StartCoord] == 1 && valid.Contains(info.StartCoord);
+                            bool c2Free = chainNodeCounts[chainId][info.EndCoord] == 1 && valid.Contains(info.EndCoord);
+
+                            bool isStartFree = false;
+                            bool isEndFree = false;
+
+                            if (form.Target == PinTarget.ChainBothEnds)
+                            {
+                                isStartFree = c1Free;
+                                isEndFree = c2Free;
+                            }
+                            else if (form.Target == PinTarget.ChainStartNode)
+                            {
+                                isStartFree = c1Free && chainStart.HasValue && info.StartCoord.Equals(chainStart.Value);
+                                isEndFree = c2Free && chainStart.HasValue && info.EndCoord.Equals(chainStart.Value);
+                            }
+                            else if (form.Target == PinTarget.ChainEndNode)
+                            {
+                                isStartFree = c1Free && chainEnd.HasValue && info.StartCoord.Equals(chainEnd.Value);
+                                isEndFree = c2Free && chainEnd.HasValue && info.EndCoord.Equals(chainEnd.Value);
+                            }
+
+                            if (!isStartFree && !isEndFree) continue;
+
+                            if (!info.CanTakeReleases)
+                            {
+                                warnings.Add(string.Format("Line {0} is not a beam or rib, so it cannot take end releases.", lineId));
+                                continue;
+                            }
+
+                            var lineItem = model.Lines.Item[lineId];
+
+                            // Read before modifying, and count only successful COM writes. A failed
+                            // write does not consume the chain's one new torsion release.
+                            RReleases relStart = new RReleases();
+                            RReleases relEnd = new RReleases();
+                            if (lineItem.GetStartReleases(ref relStart) <= 0 || lineItem.GetEndReleases(ref relEnd) <= 0)
+                            {
+                                warnings.Add("Could not read releases on line " + lineId + "; it was skipped.");
+                                continue;
+                            }
+
+                            if (isStartFree)
+                            {
+                                bool torsion = form.ReleaseTorsion && !chainTorsionReleased.Contains(chainId);
+                                relStart = ModifyRelease(relStart, form, torsion);
+                                if (lineItem.SetStartReleases(ref relStart) > 0)
+                                {
+                                    pinnedEnds++;
+                                    if (torsion) chainTorsionReleased.Add(chainId);
+                                }
+                                else warnings.Add("Could not assign start releases on line " + lineId + ".");
+                            }
+                            if (isEndFree)
+                            {
+                                bool torsion = form.ReleaseTorsion && !chainTorsionReleased.Contains(chainId);
+                                relEnd = ModifyRelease(relEnd, form, torsion);
+                                if (lineItem.SetEndReleases(ref relEnd) > 0)
+                                {
+                                    pinnedEnds++;
+                                    if (torsion) chainTorsionReleased.Add(chainId);
+                                }
+                                else warnings.Add("Could not assign end releases on line " + lineId + ".");
+                            }
+                        }
                     }
+                    finally
+                    {
+                        model.EndUpdate();
+                    }
+
+                    ShowSummary(chainCount, reorientedLines, pinnedEnds, warnings);
                 }
             }
             catch (Exception ex)
@@ -450,74 +379,471 @@ namespace AxisVM_plugin.Functions
             return 1;
         }
 
+        private static void ShowSummary(int chainCount, int reorientedLines, int pinnedEnds, List<string> warnings)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine(string.Format("Assigned {0} end release(s) across {1} chain(s).", pinnedEnds, chainCount));
+            sb.AppendLine(string.Format("Lines re-oriented along their chain: {0}", reorientedLines));
+
+            if (warnings.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("Warnings:");
+                int shown = Math.Min(warnings.Count, 10);
+                for (int i = 0; i < shown; i++) sb.AppendLine("  " + warnings[i]);
+                if (warnings.Count > shown) sb.AppendLine("  ... and " + (warnings.Count - shown) + " more");
+            }
+
+            MessageBox.Show(sb.ToString(), "End Pin Assign", MessageBoxButtons.OK,
+                pinnedEnds > 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+
+        // ------------------------------------------------------------------
+        // Reading the model
+        // ------------------------------------------------------------------
+
+        private static LineInfo ReadLine(IAxisVMModel model, int lineId)
+        {
+            try
+            {
+                var line = model.Lines.Item[lineId];
+                int startNode = line.StartNode;
+                int endNode = line.EndNode;
+
+                AxisVM.RNode n1 = new AxisVM.RNode();
+                AxisVM.RNode n2 = new AxisVM.RNode();
+                if (startNode <= 0 || endNode <= 0 || startNode == endNode) return null;
+                if (model.Nodes.GetNode(startNode, ref n1) <= 0 || model.Nodes.GetNode(endNode, ref n2) <= 0) return null;
+
+                ELineType lineType = line.LineType;
+
+                return new LineInfo
+                {
+                    LineId = lineId,
+                    StartNodeId = startNode,
+                    EndNodeId = endNode,
+                    StartCoord = new Coord(startNode, n1.x, n1.y, n1.z),
+                    EndCoord = new Coord(endNode, n2.x, n2.y, n2.z),
+                    CanTakeReleases = (lineType == ELineType.ltBeam || lineType == ELineType.ltRib)
+                };
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void AddAt(Dictionary<Coord, List<int>> map, Coord key, int lineId)
+        {
+            List<int> bucket;
+            if (!map.TryGetValue(key, out bucket)) { bucket = new List<int>(); map[key] = bucket; }
+            bucket.Add(lineId);
+        }
+
+        private static void Bump(Dictionary<Coord, int> counts, Coord key)
+        {
+            int n;
+            counts.TryGetValue(key, out n);
+            counts[key] = n + 1;
+        }
+
+        // ------------------------------------------------------------------
+        // Direction normalisation
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Walks each chain from one free end to the other and rewrites chainFreeEnds so that entry 0 is
+        /// the node the walk starts at (the chain's "Start") and the last entry is where it ends.
+        /// When <paramref name="applyFlip"/> is set (the "Auto-orient chain" option), the chain's lines are
+        /// also re-oriented in the model so every local x axis points the same way along that walk.
+        /// The walk itself is read-only, so the Start / End of a chain is well defined either way - only
+        /// the model edit is optional.
+        /// Chains that are not simple open runs - loops, branches, or anything the walk cannot cover
+        /// completely - are left untouched: there is no single direction to normalise them to.
+        /// Returns the number of lines whose orientation was changed.
+        /// </summary>
+        private static int NormaliseChainDirections(
+            IAxisVMModel model,
+            Dictionary<int, List<int>> chainLines,
+            Dictionary<int, List<Coord>> chainFreeEnds,
+            Dictionary<int, LineInfo> lines,
+            List<string> warnings,
+            bool applyFlip,
+            HashSet<int> unorderedChains)
+        {
+            List<int> toFlip = new List<int>();
+
+            foreach (var kvp in chainLines)
+            {
+                int chainId = kvp.Key;
+                List<int> ids = kvp.Value;
+                List<Coord> ends = chainFreeEnds[chainId];
+
+                if (ends.Count != 2)
+                {
+                    unorderedChains.Add(chainId);
+                    if (ids.Count > 1)
+                    {
+                        warnings.Add(string.Format("Chain {0} ({1} lines) has {2} free end(s) - it is a loop or branches, so its direction was left as-is and Start/End-only targets are skipped.",
+                            chainId + 1, ids.Count, ends.Count));
+                    }
+                    continue;
+                }
+
+                ChainTrace trace = TraceChain(ids, ends[0], lines);
+                if (trace == null)
+                {
+                    unorderedChains.Add(chainId);
+                    warnings.Add(string.Format("Chain {0} could not be walked end-to-end; Start/End-only targets are skipped.", chainId + 1));
+                    continue;
+                }
+
+                // Majority vote on the existing orientations, so we flip as few lines as possible.
+                int forward = 0;
+                foreach (bool f in trace.Forward) if (f) forward++;
+
+                if (forward * 2 < trace.Forward.Count)
+                {
+                    ChainTrace reverse = TraceChain(ids, ends[1], lines);
+                    if (reverse != null) trace = reverse;
+                }
+
+                ends[0] = trace.Start;
+                ends[1] = trace.End;
+
+                for (int i = 0; i < trace.LineIds.Count; i++)
+                {
+                    if (trace.Forward[i]) continue;
+
+                    int lineId = trace.LineIds[i];
+                    if (!lines[lineId].CanTakeReleases) continue; // BulkSetAttr rejects edges, links, ...
+                    toFlip.Add(lineId);
+                }
+            }
+
+            if (toFlip.Count == 0) return 0;
+
+            if (!applyFlip)
+            {
+                // The ends were still ordered by the walk above, so Start / End stay meaningful; only the
+                // model edit is skipped.
+                warnings.Add("Auto-orient is off: " + toFlip.Count + " line(s) still run against their chain direction in the model.");
+                return 0;
+            }
+
+            string error;
+            int flippedCount;
+            if (FlipLocalX(model, toFlip, lines, out error, out flippedCount)) return flippedCount;
+
+            warnings.Add("Could not re-orient " + toFlip.Count + " line(s): " + error +
+                         " The current local axes were re-read before assigning releases.");
+            return flippedCount;
+        }
+
+        /// <summary>
+        /// Walks the chain from <paramref name="from"/>, taking whichever unvisited line touches the
+        /// current node. Returns null when the walk does not cover every line of the chain, which means
+        /// the chain is not a simple open run.
+        /// </summary>
+        private static ChainTrace TraceChain(List<int> chainLineIds, Coord from, Dictionary<int, LineInfo> lines)
+        {
+            // A full walk can also be an Euler trail through a loop with branches.
+            // Require a simple open path explicitly, rather than just visiting every line.
+            Dictionary<Coord, int> degrees = new Dictionary<Coord, int>();
+            foreach (int id in chainLineIds)
+            {
+                Bump(degrees, lines[id].StartCoord);
+                Bump(degrees, lines[id].EndCoord);
+            }
+            int startDegree;
+            if (!degrees.TryGetValue(from, out startDegree) || startDegree != 1) return null;
+            foreach (int degree in degrees.Values) if (degree > 2) return null;
+
+            ChainTrace trace = new ChainTrace();
+            trace.Start = from;
+
+            Coord current = from;
+            HashSet<int> visited = new HashSet<int>();
+
+            while (visited.Count < chainLineIds.Count)
+            {
+                int next = -1;
+                bool forward = false;
+
+                foreach (int lineId in chainLineIds)
+                {
+                    if (visited.Contains(lineId)) continue;
+                    if (lines[lineId].StartCoord.Equals(current)) { next = lineId; forward = true; break; }
+                    if (lines[lineId].EndCoord.Equals(current)) { next = lineId; forward = false; break; }
+                }
+
+                if (next < 0) break;
+
+                visited.Add(next);
+                trace.LineIds.Add(next);
+                trace.Forward.Add(forward);
+                current = forward ? lines[next].EndCoord : lines[next].StartCoord;
+            }
+
+            trace.End = current;
+            return trace.LineIds.Count == chainLineIds.Count ? trace : null;
+        }
+
+        /// <summary>
+        /// Reverses the local x axis of the given lines through RLineAttr_V161.LocalXOrientation, which is
+        /// expressed relative to the node with the LOWER index: mlxo_ij means local x runs from the lower
+        /// index towards the higher one. Nothing else about the line is changed - the attribute records are
+        /// read and written back untouched apart from that single field.
+        /// On success the cached LineInfo entries are refreshed from the model so the caller's Start/End
+        /// coordinates match the new orientation.
+        /// </summary>
+        private static bool FlipLocalX(IAxisVMModel model, List<int> lineIds, Dictionary<int, LineInfo> lines, out string error, out int flippedCount)
+        {
+            error = null;
+            flippedCount = 0;
+
+            Array ids = Array.CreateInstance(typeof(int), new int[] { lineIds.Count }, new int[] { 1 });
+            for (int i = 0; i < lineIds.Count; i++) ids.SetValue(lineIds[i], i + 1);
+
+            Array attrs = null;
+            try
+            {
+                if (model.Lines.BulkGetAttr_V161(ids, out attrs) != lineIds.Count) attrs = null;
+            }
+            catch (Exception ex)
+            {
+                error = "BulkGetAttr_V161 failed (" + ex.Message + ").";
+                return false;
+            }
+
+            if (attrs == null)
+            {
+                error = "BulkGetAttr_V161 returned no line attributes.";
+                return false;
+            }
+
+            // The records are copied into a FRESH 1-based array of our own RLineAttr_V161 instead of
+            // being written back into the array BulkGetAttr_V161 handed us. The interop types are
+            // embedded (EmbedInteropTypes), so the element type of the returned array is only
+            // *equivalent* to the RLineAttr_V161 compiled into this assembly, not identical to it.
+            // A cast honours that equivalence, but Array.SetValue does an exact element-type check on
+            // value-type arrays and throws "Object cannot be stored in an array of this type."
+            // Building our own array side-steps it and matches how AxisVMHelper drives BulkSetAttr.
+            Array updated = Array.CreateInstance(typeof(RLineAttr_V161), new int[] { lineIds.Count }, new int[] { 1 });
+
+            int lower = attrs.GetLowerBound(0);
+            for (int i = 0; i < lineIds.Count; i++)
+            {
+                object raw;
+                try { raw = attrs.GetValue(lower + i); }
+                catch { error = "The line attribute array was shorter than the request."; return false; }
+
+                if (!(raw is RLineAttr_V161))
+                {
+                    error = "Unexpected line attribute record type.";
+                    return false;
+                }
+
+                LineInfo info = lines[lineIds[i]];
+
+                // After the flip local x must start at the node it currently ends at.
+                int fromNode = info.EndNodeId;
+                int toNode = info.StartNodeId;
+
+                RLineAttr_V161 attr = (RLineAttr_V161)raw;
+                attr.LocalXOrientation = (fromNode < toNode)
+                    ? EMemberLocXOrientation.mlxo_ij
+                    : EMemberLocXOrientation.mlxo_ji;
+
+                try { updated.SetValue(attr, i + 1); }
+                catch (Exception ex)
+                {
+                    error = "The line attribute record could not be written back (" + ex.Message + ").";
+                    return false;
+                }
+            }
+
+            bool success = false;
+            try
+            {
+                if (model.Lines.BulkSetAttr_V161(ids, updated) != lineIds.Count)
+                {
+                    error = "BulkSetAttr_V161 rejected the new orientation.";
+                }
+                else success = true;
+            }
+            catch (Exception ex)
+            {
+                error = "BulkSetAttr_V161 failed (" + ex.Message + ").";
+            }
+
+            // Re-read rather than assume: the model is the authority on which node local x now starts at.
+            foreach (int lineId in lineIds)
+            {
+                LineInfo refreshed = ReadLine(model, lineId);
+                // A failed bulk write may still have changed some records. Never assign
+                // releases using stale local start/end data, even after an API error.
+                if (refreshed == null)
+                    throw new InvalidOperationException("Could not refresh line " + lineId + " after orientation. Release assignment stopped.");
+                if (refreshed.StartNodeId != lines[lineId].EndNodeId || refreshed.EndNodeId != lines[lineId].StartNodeId)
+                {
+                    success = false;
+                    error = "The requested local x reversal was not confirmed for line " + lineId + ".";
+                }
+                else flippedCount++;
+                lines[lineId] = refreshed;
+            }
+
+            return success;
+        }
+
+        // ------------------------------------------------------------------
+        // Continuity against the rest of the model
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Drops the free ends that are really just a segment boundary inside a longer beam: the node
+        /// carries an unselected line that continues in the same direction within the angle tolerance.
+        /// </summary>
+        private static List<Coord> FilterAgainstUnselectedLines(
+            IAxisVMModel model,
+            List<Coord> freeEnds,
+            List<int> chainLineIds,
+            Dictionary<int, LineInfo> lines,
+            List<int> selectedLineIds,
+            double angleTolerance,
+            List<string> warnings)
+        {
+            List<Coord> valid = new List<Coord>();
+            HashSet<int> selected = new HashSet<int>(selectedLineIds);
+
+            foreach (Coord c in freeEnds)
+            {
+                // The chain line that owns this end - the one whose direction we compare against.
+                LineInfo owner = null;
+                foreach (int lineId in chainLineIds)
+                {
+                    LineInfo info = lines[lineId];
+                    if (info.StartCoord.Equals(c) || info.EndCoord.Equals(c)) { owner = info; break; }
+                }
+
+                if (owner == null) { valid.Add(c); continue; }
+
+                // Only lines actually meeting at this node can continue it. Resolving the node index from
+                // the owner line avoids scanning the whole model, which is what the previous
+                // Members-based scan did (and it missed lines that belong to no structural member).
+                int nodeId = owner.StartCoord.Equals(c) ? owner.StartNodeId : owner.EndNodeId;
+
+                Array connected = null;
+                try
+                {
+                    if (model.Nodes.GetConnectedLines(nodeId, out connected) < 0 || connected == null)
+                        throw new InvalidOperationException("No connectivity data returned.");
+                }
+                catch (Exception ex)
+                {
+                    // With continuity checking requested, an unreadable node must not earn a pin.
+                    warnings.Add("Continuity could not be checked at node " + nodeId + "; no pin assigned there. " + ex.Message);
+                    continue;
+                }
+
+                bool isTrulyFree = true;
+                if (connected != null)
+                {
+                    foreach (object obj in connected)
+                    {
+                        int otherId = Convert.ToInt32(obj);
+                        if (otherId <= 0 || selected.Contains(otherId)) continue;
+
+                        LineInfo other = ReadLine(model, otherId);
+                        if (other == null)
+                        {
+                            warnings.Add("Connected line " + otherId + " could not be read; no pin assigned at node " + nodeId + ".");
+                            isTrulyFree = false;
+                            break;
+                        }
+                        if (!other.CanTakeReleases) continue; // geometric edges/links are not beam continuations
+                        if (!other.StartCoord.Equals(c) && !other.EndCoord.Equals(c)) continue;
+
+                        if (IsContinuousStrict(owner, other, c, angleTolerance)) { isTrulyFree = false; break; }
+                    }
+                }
+
+                if (isTrulyFree) valid.Add(c);
+            }
+
+            return valid;
+        }
+
+        // ------------------------------------------------------------------
+        // Geometry
+        // ------------------------------------------------------------------
+
         private static RReleases ModifyRelease(RReleases rel, EndPinAssignForm form, bool applyTorsion)
         {
             if (form.IsSemiRigid)
             {
                 rel.yy = new RRelease() { ReleaseType = EReleaseType.rtSemiRigid, Init = form.Stiffness };
                 rel.zz = new RRelease() { ReleaseType = EReleaseType.rtSemiRigid, Init = form.Stiffness };
-                
+
                 if (applyTorsion)
                     rel.xx = new RRelease() { ReleaseType = EReleaseType.rtSemiRigid, Init = form.Stiffness };
-                else
-                    rel.xx = new RRelease() { ReleaseType = EReleaseType.rtRigid };
+
             }
             else
             {
                 rel.yy = new RRelease() { ReleaseType = EReleaseType.rtHinged };
                 rel.zz = new RRelease() { ReleaseType = EReleaseType.rtHinged };
-                
+
                 if (applyTorsion)
                     rel.xx = new RRelease() { ReleaseType = EReleaseType.rtHinged };
-                else
-                    rel.xx = new RRelease() { ReleaseType = EReleaseType.rtRigid };
+
             }
-            
+
             // Note: We intentionally DO NOT modify x, y, and z translational releases.
-            // We only touch rotations.
-            
+            // Existing torsion is preserved unless this end explicitly receives a new torsion release.
+
             return rel;
         }
 
-        private static bool IsContinuousStrict(int currentLineId, int otherLineId, Coord sharedCoord, double angleTolerance, Dictionary<int, Coord> lineStartCoords, Dictionary<int, Coord> lineEndCoords)
+        /// <summary>
+        /// True when the two lines meeting at <paramref name="sharedCoord"/> bend by no more than the
+        /// tolerance. The bend is measured as the smaller of (angle, 180 - angle), so a line's own
+        /// direction of definition does not affect the result.
+        /// </summary>
+        private static bool IsContinuousStrict(LineInfo current, LineInfo other, Coord sharedCoord, double angleTolerance)
         {
-            Coord cN1 = lineStartCoords[currentLineId];
-            Coord cN2 = lineEndCoords[currentLineId];
-            
             double cx, cy, cz;
-            if (cN1.Equals(sharedCoord)) { cx = cN2.X - cN1.X; cy = cN2.Y - cN1.Y; cz = cN2.Z - cN1.Z; }
-            else { cx = cN1.X - cN2.X; cy = cN1.Y - cN2.Y; cz = cN1.Z - cN2.Z; }
-            
-            double cLen = Math.Sqrt(cx*cx + cy*cy + cz*cz);
-            if (cLen < 1e-6) return false;
-            cx /= cLen; cy /= cLen; cz /= cLen;
-            
-            Coord oN1 = lineStartCoords[otherLineId];
-            Coord oN2 = lineEndCoords[otherLineId];
-            
+            if (!Direction(current, sharedCoord, out cx, out cy, out cz)) return false;
+
             double ox, oy, oz;
-            if (oN1.Equals(sharedCoord)) { ox = oN2.X - oN1.X; oy = oN2.Y - oN1.Y; oz = oN2.Z - oN1.Z; }
-            else { ox = oN1.X - oN2.X; oy = oN1.Y - oN2.Y; oz = oN1.Z - oN2.Z; }
-            
-            double oLen = Math.Sqrt(ox*ox + oy*oy + oz*oz);
-            if (oLen < 1e-6) return false;
-            ox /= oLen; oy /= oLen; oz /= oLen;
-            
-            double dot = cx*ox + cy*oy + cz*oz;
+            if (!Direction(other, sharedCoord, out ox, out oy, out oz)) return false;
+
+            double dot = cx * ox + cy * oy + cz * oz;
             if (dot < -1) dot = -1;
             if (dot > 1) dot = 1;
-            
-            double angleRad = Math.Acos(dot);
-            double angleDeg = angleRad * 180.0 / Math.PI;
-            
+
+            double angleDeg = Math.Acos(dot) * 180.0 / Math.PI;
             double smallerAngle = Math.Min(angleDeg, 180.0 - angleDeg);
-            
-            if (smallerAngle <= angleTolerance + 1e-5)
-            {
-                return true;
-            }
-            
-            return false;
+
+            return smallerAngle <= angleTolerance + 1e-5;
+        }
+
+        /// <summary>Unit vector of the line pointing away from the shared node.</summary>
+        private static bool Direction(LineInfo line, Coord sharedCoord, out double x, out double y, out double z)
+        {
+            Coord a = line.StartCoord;
+            Coord b = line.EndCoord;
+
+            if (a.Equals(sharedCoord)) { x = b.X - a.X; y = b.Y - a.Y; z = b.Z - a.Z; }
+            else if (b.Equals(sharedCoord)) { x = a.X - b.X; y = a.Y - b.Y; z = a.Z - b.Z; }
+            else { x = y = z = 0; return false; }
+
+            double len = Math.Sqrt(x * x + y * y + z * z);
+            if (double.IsNaN(len) || double.IsInfinity(len) || len < 1e-12) { x = y = z = 0; return false; }
+
+            x /= len; y /= len; z /= len;
+            return true;
         }
     }
 }
