@@ -31,6 +31,7 @@ AxisVM plugin/                      <- AxisVM sources (repository root is one le
 |---|---|---|
 | N. Rhino Import | RhinoImportAddon | (see source `Functions/RhinoImportLogic.cs`) |
 | N. Lines -> One-Way Panel | OneWayLoadPanelAddon | [docs/addons/OneWayLoadPanelAddon.md](docs/addons/OneWayLoadPanelAddon.md) |
+| N. Convert Load Panel -> One-Way | ConvertLoadPanelOneWayAddon | [docs/addons/ConvertLoadPanelOneWayAddon.md](docs/addons/ConvertLoadPanelOneWayAddon.md) |
 | N. Load Panel Tools | LoadPanelToolsAddon | [docs/addons/LoadPanelToolsAddon.md](docs/addons/LoadPanelToolsAddon.md) |
 | N. End Pin Assign (WIP) | EndPinAssignAddon | [docs/addons/EndPinAssignAddon.md](docs/addons/EndPinAssignAddon.md) |
 | N. Reaction Transfer (WIP) | ReactionTransferAddon | [docs/addons/ReactionTransferAddon.md](docs/addons/ReactionTransferAddon.md) |

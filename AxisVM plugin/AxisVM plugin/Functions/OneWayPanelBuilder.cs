@@ -49,7 +49,8 @@ namespace AxisVM_plugin.Functions
     }
 
     /// <summary>
-    /// The shared geometry engine for the Lines -> One-Way Panel addon and Rhino import.
+    /// The shared geometry engine for the Lines -> One-Way Panel addon, the Convert Load Panel
+    /// -> One-Way addon, and Rhino import.
     ///
     /// It takes a set of connected boundary segments, reconstructs the physically-straight sides
     /// with <see cref="EdgeChainBuilder"/> (so a side split into several collinear beams is handled),
