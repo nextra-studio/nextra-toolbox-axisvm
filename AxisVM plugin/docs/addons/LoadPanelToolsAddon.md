@@ -1,7 +1,7 @@
 # Load Panel Tools Addon
 
 ## Overview
-Three load panel operations that all work on **everything currently selected**, not one object at a time.
+Four load panel operations that all work on **everything currently selected**, not one object at a time.
 The whole run — whichever operation — sits inside a single `BeginUpdate` / `EndUpdate` pair (`try/finally`,
 followed by `Refresh`), so AxisVM redraws once and one summary dialog reports the outcome.
 
@@ -10,9 +10,10 @@ followed by `Refresh`), so AxisVM redraws once and one summary dialog reports th
 | **Load Panel → Domain** | load panels | creates a domain on each panel's contour |
 | **Domain → Load Panel** | domains | `LoadPanels.AddFromDomain` per domain |
 | **Split Load Panel by lines** | load panels **and** lines | cuts each panel into the pieces the lines divide it into |
+| **Merge Load Panels** | load panels | joins coplanar panels that share edge lines into one panel per group |
 
-A checkbox decides whether the source object is deleted once its counterpart exists. Splitting always
-replaces the original — the checkbox is disabled and forced on for that mode.
+A checkbox decides whether the source object is deleted once its counterpart exists. Splitting and merging
+always replace the originals — the checkbox is disabled and forced on for those modes.
 
 ## The UID discipline
 This is the thing to keep in mind when editing the operations. Three AxisVM operations renumber collections:
@@ -79,29 +80,56 @@ analysis: contradicting flags give identical beam forces), and `SetLines` clears
 
 ### Loads
 Deleting a panel deletes its loads. Before the first cut, the panel's uniform/linear area loads are read and
-then re-added to every final piece with `AddLoadPanelLinear`. There is no typed getter for panel loads:
-`GetLoad` returns the record bytes, and a 120-byte record whose case and panel fields match the load's own
-is decoded as `RLoadPanelLinear` (5 × int32, 4 bytes padding, 12 doubles). Panel loads report `LoadType -1`
-with the panel index as `ElementId`. Other panel load kinds are counted and reported, not guessed at.
+then re-added to every final piece with `AddLoadPanelLinear`. See **Panel load records** below for how they
+are read. A **linear** load is re-expressed per piece: AxisVM rejects (−100027) a linear load whose three
+reference points are not on the panel, so the points move to three corners of the piece and the values there
+are taken from the original plane field. The load field itself is unchanged.
 
 ### Several lines through one panel
 A worklist drives it: cut a panel, queue its two pieces, then try the remaining lines against those. A panel
 crossed by two lines ends up as three or four pieces. Each cutting line is consumed once per original panel.
 
+## 4. Merge Load Panels
+- Selected panels that **share contour lines** form a group (union-find over line UIDs); each group becomes one
+  panel. Panels touching only at a corner, or along edges made of *different* lines, are not connected.
+- The outline is every edge used by exactly one panel of the group; shared edges fall inside. It is walked with
+  the same ring builder as split and must be **one closed loop** — a group enclosing a hole is refused.
+- A group is refused, with a reason, when its panels are not coplanar (1 mm), mix `Auto` on and off, carry a
+  load kind that cannot be read back, or carry **different loads**. Loads are compared as fields: same case,
+  component and kind, and each load evaluated at the other's reference points gives its values — so pieces cut
+  from one sloped load still merge.
+- The merged panel keeps the loaded outline edges (`SetLines`), the `Auto` flag, and gets the load set once.
+  Shared edges that carried load (e.g. a beam that was used as a cut) stop receiving load; the summary says
+  how many. The cut lines themselves stay in the model.
+- The merged panel is created first, then the originals are deleted (`DeleteSelected`), then the merged panel
+  is found again by UID because deletion renumbers panels.
+
+## Panel load records
+There is no typed getter for panel loads. They report `LoadType −1` with the panel index as `ElementId`, and
+`GetLoad` returns 120 bytes: 5 × int32 (case, panel, distribution, load distribution, component), 4 bytes
+padding, 3 load doubles, then the plane points x1..x3, y1..y3, z1..z3. The three load doubles are **not**
+P1..P3 for a constant load: AxisVM stores it as a vector, the value in the X, Y or Z slot of its component.
+Only an `ldtLinear` load stores P1, P2, P3 there. (Reading them as P1..P3 turns a constant −5 into 0, 0, −5,
+and writing that back stores a zero load.) Records that do not match this shape are counted and reported.
+
 ## File Structure
 - `Addons/LoadPanelToolsAddon.cs` — COM interface registration, toolbar icon, menu visibility.
 - `UI/LoadPanelToolsForm.cs` — operation radio group, per-operation hints, delete-original checkbox.
 - `Functions/LoadPanelToolsLogic.cs` — entry point: selection, dialog, `BeginUpdate` batch, summary.
-- `Functions/LoadPanelOps.cs` — the three operations, UI-free.
+- `Functions/LoadPanelOps.cs` — the four operations, UI-free.
 - `LoadPanelToolsAddon.csproj` — compiles only its own sources plus `Properties/AssemblyInfo.cs`.
 
 ## Live checks
-`Checks/LoadPanelToolsLiveChecks` runs `LoadPanelOps.cs` against a real AxisVM: 10 cases (split by one line,
-two lines, a diagonal, three rejections; panel → domain keep/delete with load transfer; domain → panel keep,
-duplicate, delete). It builds its geometry at x ≥ 100 m and deletes everything it made.
+`Checks/LoadPanelToolsLiveChecks` runs `LoadPanelOps.cs` against a real AxisVM: 31 cases, 101 checks — split
+(one/two lines, diagonal, corner to edge, pre-split edges, wall panel, beam cutter, Auto panel, linear load,
+several panels at once, crossing lines, rejections), panel ↔ domain (keep/delete, load transfer, several at
+once, user-defined polygon panel), and merge (round trip, three pieces, two groups, L shape, refusals for
+non-adjacent / different loads / not coplanar / mixed Auto, loaded interior beam). Loads are checked by value,
+not only by count. It builds its geometry at x ≥ 100 m and deletes everything it made.
 
 It only runs against a **scratch** instance: start a separate AxisVM, save its empty model as
-`LoadPanelTest*.axs` (with at least one material), and pass its process id:
+`LoadPanelTest*.axs` with at least one material and one cross-section (e.g. one beam far away) and one
+user-defined polygon panel (`LoadPanels.AddFromPolygon`), and pass its process id:
 
 ```
 MSBuild Checks\LoadPanelToolsLiveChecks.csproj /p:Configuration=Debug
@@ -116,7 +144,9 @@ Table (AxisVM itself is not registered there), and refuses to run if the open fi
 ## Notes / limitations
 - **No intersection maths.** A cutting line's ends must be *existing nodes* on the contour. A line that
   merely crosses the contour with no node there is skipped rather than intersected.
-- Two cutting lines that cross each other inside a panel are not intersected either: the second one is tried
-  against the pieces of the first and skipped when neither piece holds both its ends.
+- Two cutting lines that cross each other inside a panel are not intersected either: the second one is skipped
+  and the summary reports it as a selected line that did not cut anything.
+- A cut must be **one** line from contour to contour. A T drawn in AxisVM splits the first line where the
+  second meets it, and those two halves are refused as cuts (each has an end inside the panel).
 - Interop signature gotcha: `GetContourLineIDs` is `ref`, `GetLines` is `out`. They are inconsistent in the
   interop assembly, so check before adding calls.

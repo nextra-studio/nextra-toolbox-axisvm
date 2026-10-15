@@ -49,6 +49,7 @@ internal static class LoadPanelToolsLiveChecks
             DomainToPanel();
             DomainToPanelDelete();
 
+            SplitKeepsLinearLoad();
             SplitByBeamCarriesLoad();
             SplitAutoPanel();
             SplitCornerToEdge();
@@ -60,6 +61,16 @@ internal static class LoadPanelToolsLiveChecks
             UserDefinedPanelIsSkipped();
             SeveralPanelsToDomains();
             SeveralDomainsToPanelsDelete();
+
+            MergeRoundTrip();
+            MergeThreePieces();
+            MergeTwoGroupsAtOnce();
+            MergeLShape();
+            MergeRefusesNonAdjacent();
+            MergeRefusesDifferentLoads();
+            MergeRefusesNonCoplanar();
+            MergeRefusesMixedAuto();
+            MergeReportsLoadedInteriorBeam();
         }
         catch (Exception ex)
         {
@@ -184,6 +195,8 @@ internal static class LoadPanelToolsLiveChecks
             if ((int)m.Loads.get_LoadType(i) == -1 && m.Loads.get_ElementId(i) == idx) loads++;
         }
         Check(loads == 1, label + ": piece " + idx + " carries the copied load");
+        double[] v = PanelLoadValues(idx);
+        Check(v != null && v.All(x => Math.Abs(x + 5) < 1e-9), label + ": piece " + idx + " load is -5 kN/m2 (got " + (v == null ? "none" : string.Join(",", v)) + ")");
     }
 
     // ------------------------------------------------------------------
@@ -422,6 +435,215 @@ internal static class LoadPanelToolsLiveChecks
         Check(res.Converted == 2 && res.Deleted == 2 && m.Domains.Count == domains - 2, "two domains -> panels (delete): both domains removed");
         Check(res.SurvivingPanels == 2, "two domains -> panels (delete): both panels survive");
         Check(d2 > 0 && Math.Abs(m.Domains.Item[m.Domains.Count].Area - 6) < 1e-6, "two domains -> panels (delete): the unselected 3x2 domain is untouched");
+    }
+
+    // ------------------------------------------------------------------
+    // Merge
+    // ------------------------------------------------------------------
+
+    /// <summary>Splits a fresh 6 x 4 panel by vertical lines at the given x and returns the pieces' UIDs.</summary>
+    private static List<int> SplitRect(params double[] xs)
+    {
+        Rect r = NewRect(6, 4);
+        List<int> cuts = xs.Select(x => Uid(Line(Node(x, 0), Node(x, 4)))).ToList();
+        LoadPanelOpResult res = Run(() => LoadPanelOps.SplitPanels(m, new[] { r.PanelUid }, cuts));
+        if (res.PiecesCreated != xs.Length + 1) throw new InvalidOperationException("setup split failed");
+        return res.Created;
+    }
+
+    /// <summary>
+    /// Values of the first panel load on a panel, read independently of LoadPanelOps from the GetLoad bytes:
+    /// a constant load stores its value in the X/Y/Z slot of its component, a linear one stores P1..P3.
+    /// </summary>
+    private static double[] PanelLoadValues(int panelIndex)
+    {
+        for (int i = 1; i <= m.Loads.Count; i++)
+        {
+            if ((int)m.Loads.get_LoadType(i) != -1 || m.Loads.get_ElementId(i) != panelIndex) continue;
+            Array data;
+            m.Loads.GetLoad(i, out data);
+            byte[] b = data.Cast<object>().Select(Convert.ToByte).ToArray();
+            int dist = BitConverter.ToInt32(b, 12), comp = BitConverter.ToInt32(b, 16);
+            if (dist == 0) { double p = BitConverter.ToDouble(b, 24 + 8 * comp); return new[] { p, p, p }; }
+            return new[] { BitConverter.ToDouble(b, 24), BitConverter.ToDouble(b, 32), BitConverter.ToDouble(b, 40) };
+        }
+        return null;
+    }
+
+    private static void SplitKeepsLinearLoad()
+    {
+        Rect r = NewRect(6, 4);
+        int idx = m.LoadPanels.get_IndexOfUID(r.PanelUid);
+        // Replace the constant load by a linear one: -2 at (0,0), -4 at (6,0), -6 at (0,4).
+        for (int i = m.Loads.Count; i >= 1; i--)
+        {
+            if ((int)m.Loads.get_LoadType(i) == -1 && m.Loads.get_ElementId(i) == idx) m.Loads.Delete(i);
+        }
+        RLoadPanelLinear lin = new RLoadPanelLinear();
+        lin.LoadCaseId = 1; lin.LoadPanelId = idx; lin.Component = EAxis.aZ;
+        lin.LoadDistributionType = ELoadDistributionType.ldtLinear;
+        lin.P1 = -2; lin.P2 = -4; lin.P3 = -6;
+        lin.x1 = x0; lin.x2 = x0 + 6; lin.x3 = x0; lin.y3 = 4;
+        if (m.Loads.AddLoadPanelLinear(ref lin) <= 0) throw new InvalidOperationException("linear test load rejected");
+        int cut = Line(Node(3, 0), Node(3, 4));
+
+        LoadPanelOpResult res = Run(() => LoadPanelOps.SplitPanels(m, new[] { r.PanelUid }, new[] { Uid(cut) }));
+
+        Check(res.LoadsCopied == 2, "linear load: copied to both pieces");
+        foreach (int uid in res.Created) CheckLinearField(m.LoadPanels.get_IndexOfUID(uid), "linear load: piece");
+
+        // ...and back: the two pieces carry the same field, so they merge into one panel that still has it.
+        LoadPanelOpResult merged = Run(() => LoadPanelOps.MergePanels(m, res.Created));
+        Check(merged.Created.Count == 1 && merged.LoadsCopied == 1, "linear load: pieces merge back with one load");
+        if (merged.Created.Count == 1) CheckLinearField(m.LoadPanels.get_IndexOfUID(merged.Created[0]), "linear load: merged panel");
+    }
+
+    /// <summary>The panel's load must be the field -2 - (x - x0)/3 - y: -2 at (0,0), -4 at (6,0), -6 at (0,4).</summary>
+    private static void CheckLinearField(int panelIndex, string label)
+    {
+        for (int i = 1; i <= m.Loads.Count; i++)
+        {
+            if ((int)m.Loads.get_LoadType(i) != -1 || m.Loads.get_ElementId(i) != panelIndex) continue;
+            Array data;
+            m.Loads.GetLoad(i, out data);
+            byte[] b = data.Cast<object>().Select(Convert.ToByte).ToArray();
+            bool ok = BitConverter.ToInt32(b, 12) == 1;
+            string got = "";
+            for (int k = 0; k < 3; k++)
+            {
+                double p = BitConverter.ToDouble(b, 24 + 8 * k), x = BitConverter.ToDouble(b, 48 + 8 * k), y = BitConverter.ToDouble(b, 72 + 8 * k);
+                double expected = -2 - (x - x0) / 3 - y;
+                ok &= Math.Abs(p - expected) < 1e-9;
+                got += string.Format(" ({0:0.###},{1:0.###})={2:0.###}", x - x0, y, p);
+            }
+            Check(ok, label + " " + panelIndex + " carries the same linear field:" + got);
+            return;
+        }
+        Check(false, label + " " + panelIndex + " has no load");
+    }
+
+    private static int PanelLoadCount(int panelIndex)
+    {
+        int n = 0;
+        for (int i = 1; i <= m.Loads.Count; i++)
+        {
+            if ((int)m.Loads.get_LoadType(i) == -1 && m.Loads.get_ElementId(i) == panelIndex) n++;
+        }
+        return n;
+    }
+
+    private static void MergeRoundTrip()
+    {
+        List<int> pieces = SplitRect(3);
+        int loadsBefore = m.Loads.Count;
+
+        LoadPanelOpResult res = Run(() => LoadPanelOps.MergePanels(m, pieces));
+
+        Check(res.Converted == 2 && res.Created.Count == 1 && res.Deleted == 2 && res.Notes.Count == 0, "merge after split: 2 pieces become 1 panel");
+        int idx = m.LoadPanels.get_IndexOfUID(res.Created[0]);
+        Check(ContourIds(idx).Count == 6, "merge after split: outline is the 6 original edge parts (cut line inside)");
+        List<int> loaded = LoadedIds(idx);
+        Check(loaded.Count == 4 && loaded.All(IsLongEdge), "merge after split: all 4 long-edge parts loaded (got " + string.Join(",", loaded) + ")");
+        Check(PanelLoadCount(idx) == 1 && m.Loads.Count == loadsBefore - 1, "merge after split: exactly one load on the merged panel");
+        double[] v = PanelLoadValues(idx);
+        Check(v != null && v.All(x => Math.Abs(x + 5) < 1e-9), "merge after split: merged load is -5 kN/m2 (got " + (v == null ? "none" : string.Join(",", v)) + ")");
+        Check(m.LoadPanels.Item[idx].Auto == ELongBoolean.lbFalse, "merge after split: Auto flag kept");
+    }
+
+    private static void MergeThreePieces()
+    {
+        List<int> pieces = SplitRect(2, 4);
+
+        LoadPanelOpResult res = Run(() => LoadPanelOps.MergePanels(m, pieces));
+
+        Check(res.Converted == 3 && res.Created.Count == 1 && res.LoadsCopied == 1, "merge three pieces: one panel with one load");
+        Check(ContourIds(m.LoadPanels.get_IndexOfUID(res.Created[0])).Count == 8, "merge three pieces: outline has 8 edge parts");
+    }
+
+    private static void MergeTwoGroupsAtOnce()
+    {
+        List<int> a = SplitRect(3), b = SplitRect(3);
+
+        LoadPanelOpResult res = Run(() => LoadPanelOps.MergePanels(m, a.Concat(b).ToList()));
+
+        Check(res.Converted == 4 && res.Created.Count == 2 && res.LoadsCopied == 2 && res.Notes.Count == 0, "two separate groups: merged into 2 panels, one load each");
+    }
+
+    private static void MergeLShape()
+    {
+        // A: 6 x 4 with its top edge already split at x = 2. B: 2 x 2 sitting on the left part of that edge.
+        NextSlot();
+        int a0 = Node(0, 0), a1 = Node(6, 0), a2 = Node(6, 4), a3 = Node(2, 4), a4 = Node(0, 4), b1 = Node(2, 6), b2 = Node(0, 6);
+        int shared = Line(a4, a3);
+        int pa = Panel(new[] { Line(a0, a1), Line(a1, a2), Line(a2, a3), shared, Line(a4, a0) }, new int[0]);
+        int pb = Panel(new[] { shared, Line(a3, b1), Line(b1, b2), Line(b2, a4) }, new int[0]);
+
+        LoadPanelOpResult res = Run(() => LoadPanelOps.MergePanels(m, new[] { pa, pb }));
+
+        Check(res.Created.Count == 1 && ContourIds(m.LoadPanels.get_IndexOfUID(res.Created[0])).Count == 7, "L shape: merged into one 7-edge panel");
+    }
+
+    private static void MergeRefusesNonAdjacent()
+    {
+        Rect a = NewRect(6, 4), b = NewRect(6, 4);
+
+        LoadPanelOpResult res = Run(() => LoadPanelOps.MergePanels(m, new[] { a.PanelUid, b.PanelUid }));
+
+        Check(res.Created.Count == 0 && res.Notes.Count == 2 && res.Notes.All(s => s.Contains("shares no edge")), "not adjacent: nothing merged, both reported");
+        Check(m.LoadPanels.get_IndexOfUID(a.PanelUid) > 0 && m.LoadPanels.get_IndexOfUID(b.PanelUid) > 0, "not adjacent: both panels kept");
+    }
+
+    private static void MergeRefusesDifferentLoads()
+    {
+        List<int> pieces = SplitRect(3);
+        // Make one piece's load different: add a second load to it.
+        int idx = m.LoadPanels.get_IndexOfUID(pieces[0]);
+        RLoadPanelLinear extra = new RLoadPanelLinear();
+        extra.LoadCaseId = 1; extra.LoadPanelId = idx; extra.Component = EAxis.aZ;
+        extra.P1 = extra.P2 = extra.P3 = -2;
+        m.Loads.AddLoadPanelLinear(ref extra);
+
+        LoadPanelOpResult res = Run(() => LoadPanelOps.MergePanels(m, pieces));
+
+        Check(res.Created.Count == 0 && res.Notes.Count == 1 && res.Notes[0].Contains("different loads"), "different loads: refused with a reason");
+        Check(pieces.All(u => m.LoadPanels.get_IndexOfUID(u) > 0), "different loads: panels kept");
+    }
+
+    private static void MergeRefusesNonCoplanar()
+    {
+        // A floor panel and a wall panel sharing the floor's back edge.
+        NextSlot();
+        int f0 = Node3(0, 0, 0), f1 = Node3(6, 0, 0), f2 = Node3(6, 4, 0), f3 = Node3(0, 4, 0), w2 = Node3(6, 4, 3), w3 = Node3(0, 4, 3);
+        int shared = Line(f2, f3);
+        int floor = Panel(new[] { Line(f0, f1), Line(f1, f2), shared, Line(f3, f0) }, new int[0]);
+        int wall = Panel(new[] { shared, Line(f2, w2), Line(w2, w3), Line(w3, f3) }, new int[0]);
+
+        LoadPanelOpResult res = Run(() => LoadPanelOps.MergePanels(m, new[] { floor, wall }));
+
+        Check(res.Created.Count == 0 && res.Notes.Count == 1 && res.Notes[0].Contains("one plane"), "floor + wall: refused, not coplanar");
+    }
+
+    private static void MergeRefusesMixedAuto()
+    {
+        List<int> pieces = SplitRect(3);
+        m.LoadPanels.Item[m.LoadPanels.get_IndexOfUID(pieces[0])].Auto = ELongBoolean.lbTrue;
+
+        LoadPanelOpResult res = Run(() => LoadPanelOps.MergePanels(m, pieces));
+
+        Check(res.Created.Count == 0 && res.Notes.Count == 1 && res.Notes[0].Contains("Auto"), "mixed Auto: refused with a reason");
+    }
+
+    private static void MergeReportsLoadedInteriorBeam()
+    {
+        Rect r = NewRect(6, 4);
+        int cut = Line(Node(3, 0), Node(3, 4));
+        RPoint3d ecc = new RPoint3d();
+        m.Lines.Item[cut].DefineAsBeam(1, 1, 1, ref ecc, ref ecc);
+        LoadPanelOpResult split = Run(() => LoadPanelOps.SplitPanels(m, new[] { r.PanelUid }, new[] { Uid(cut) }));
+
+        LoadPanelOpResult res = Run(() => LoadPanelOps.MergePanels(m, split.Created));
+
+        Check(res.Created.Count == 1 && res.Notes.Count == 1 && res.Notes[0].Contains("1 shared edge(s) carried load"), "merge over a loaded beam: merged, lost beam load reported");
     }
 
     private static int FirstUserDefinedPanelUid()

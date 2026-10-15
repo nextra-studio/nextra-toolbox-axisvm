@@ -43,6 +43,10 @@ namespace AxisVM_plugin.Functions
                                 result = LoadPanelOps.DomainsToPanels(model, LoadPanelOps.SelectedDomainIds(model), form.DeleteOriginal);
                                 break;
 
+                            case LoadPanelOperation.MergePanels:
+                                result = LoadPanelOps.MergePanels(model, LoadPanelOps.SelectedPanelUids(model));
+                                break;
+
                             default:
                                 result = LoadPanelOps.SplitPanels(model, LoadPanelOps.SelectedPanelUids(model), LoadPanelOps.SelectedLineUids(model));
                                 break;
@@ -80,6 +84,11 @@ namespace AxisVM_plugin.Functions
             {
                 sb.AppendLine(string.Format("Created {0} load panel(s) from the selected domains.", r.Converted));
                 if (r.Deleted > 0) sb.AppendLine(string.Format("Deleted {0} source domain(s).", r.Deleted));
+            }
+            else if (operation == LoadPanelOperation.MergePanels)
+            {
+                sb.AppendLine(string.Format("Merged {0} load panel(s) into {1} panel(s).", r.Converted, r.Created.Count));
+                if (r.LoadsCopied > 0) sb.AppendLine(string.Format("Applied {0} panel load(s) to the merged panels.", r.LoadsCopied));
             }
             else
             {

@@ -8,7 +8,8 @@ namespace AxisVM_plugin.UI
     {
         PanelToDomain,
         DomainToPanel,
-        SplitPanelByLines
+        SplitPanelByLines,
+        MergePanels
     }
 
     public class LoadPanelToolsForm : Form
@@ -21,6 +22,7 @@ namespace AxisVM_plugin.UI
         private RadioButton radPanelToDomain;
         private RadioButton radDomainToPanel;
         private RadioButton radSplit;
+        private RadioButton radMerge;
         private CheckBox chkDeleteOriginal;
         private Label lblWhatToSelect;
         private Label lblDefaults;
@@ -40,7 +42,7 @@ namespace AxisVM_plugin.UI
         {
             this.Text = "Load Panel Tools";
             // ClientSize rather than Size, so the button row sits where it is put.
-            this.ClientSize = new Size(420, 320);
+            this.ClientSize = new Size(420, 345);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
@@ -50,23 +52,25 @@ namespace AxisVM_plugin.UI
             {
                 Text = "Operation",
                 Location = new Point(15, 15),
-                Size = new Size(390, 110)
+                Size = new Size(390, 135)
             };
 
             radPanelToDomain = new RadioButton { Text = "Load Panel  →  Domain", Location = new Point(20, 25), AutoSize = true, Checked = true };
             radDomainToPanel = new RadioButton { Text = "Domain  →  Load Panel", Location = new Point(20, 50), AutoSize = true };
             radSplit = new RadioButton { Text = "Split Load Panel by selected lines", Location = new Point(20, 75), AutoSize = true };
+            radMerge = new RadioButton { Text = "Merge selected Load Panels", Location = new Point(20, 100), AutoSize = true };
 
             radPanelToDomain.CheckedChanged += Operation_CheckedChanged;
             radDomainToPanel.CheckedChanged += Operation_CheckedChanged;
             radSplit.CheckedChanged += Operation_CheckedChanged;
+            radMerge.CheckedChanged += Operation_CheckedChanged;
 
-            grpOperation.Controls.AddRange(new Control[] { radPanelToDomain, radDomainToPanel, radSplit });
+            grpOperation.Controls.AddRange(new Control[] { radPanelToDomain, radDomainToPanel, radSplit, radMerge });
             this.Controls.Add(grpOperation);
 
             lblWhatToSelect = new Label
             {
-                Location = new Point(18, 135),
+                Location = new Point(18, 160),
                 Size = new Size(390, 34),
                 ForeColor = SystemColors.GrayText
             };
@@ -74,7 +78,7 @@ namespace AxisVM_plugin.UI
 
             lblDefaults = new Label
             {
-                Location = new Point(18, 175),
+                Location = new Point(18, 200),
                 Size = new Size(390, 58),
                 ForeColor = SystemColors.GrayText
             };
@@ -83,15 +87,15 @@ namespace AxisVM_plugin.UI
             chkDeleteOriginal = new CheckBox
             {
                 Text = "Delete the original after converting",
-                Location = new Point(18, 240),
+                Location = new Point(18, 265),
                 AutoSize = true,
                 Checked = false
             };
             this.Controls.Add(chkDeleteOriginal);
 
-            btnOk = new Button { Text = "Apply", Location = new Point(230, 278), Size = new Size(80, 28), DialogResult = DialogResult.OK };
+            btnOk = new Button { Text = "Apply", Location = new Point(230, 303), Size = new Size(80, 28), DialogResult = DialogResult.OK };
             btnOk.Click += BtnOk_Click;
-            btnCancel = new Button { Text = "Cancel", Location = new Point(320, 278), Size = new Size(80, 28), DialogResult = DialogResult.Cancel };
+            btnCancel = new Button { Text = "Cancel", Location = new Point(320, 303), Size = new Size(80, 28), DialogResult = DialogResult.Cancel };
 
             this.Controls.Add(btnOk);
             this.Controls.Add(btnCancel);
@@ -126,6 +130,15 @@ namespace AxisVM_plugin.UI
                 chkDeleteOriginal.Text = "Delete the domain once its load panel exists";
                 chkDeleteOriginal.Enabled = true;
             }
+            else if (radMerge.Checked)
+            {
+                lblWhatToSelect.Text = "Select the load panels to merge. Panels that lie in one plane and share edge\nlines become one panel; separate groups are merged separately.";
+                lblDefaults.Text = "The merged panel keeps the loaded outline edges and the loads, which must be\n" +
+                                   "the same on every panel. Shared edges end up inside it and stop receiving\n" +
+                                   "load. The cut lines themselves stay in the model.";
+                chkDeleteOriginal.Text = "Delete the originals (always on when merging)";
+                chkDeleteOriginal.Enabled = false;
+            }
             else
             {
                 lblWhatToSelect.Text = "Select the load panels AND the lines that cut them. Each cutting line must run\nbetween two points on the panel's contour.";
@@ -139,12 +152,13 @@ namespace AxisVM_plugin.UI
 
         private void BtnOk_Click(object sender, EventArgs e)
         {
-            Operation = radPanelToDomain.Checked
-                ? LoadPanelOperation.PanelToDomain
-                : (radDomainToPanel.Checked ? LoadPanelOperation.DomainToPanel : LoadPanelOperation.SplitPanelByLines);
+            if (radPanelToDomain.Checked) Operation = LoadPanelOperation.PanelToDomain;
+            else if (radDomainToPanel.Checked) Operation = LoadPanelOperation.DomainToPanel;
+            else if (radMerge.Checked) Operation = LoadPanelOperation.MergePanels;
+            else Operation = LoadPanelOperation.SplitPanelByLines;
 
-            // Splitting replaces the panel by definition - there is nothing meaningful to keep.
-            DeleteOriginal = (Operation == LoadPanelOperation.SplitPanelByLines) || chkDeleteOriginal.Checked;
+            // Splitting and merging replace the panels by definition - there is nothing meaningful to keep.
+            DeleteOriginal = Operation == LoadPanelOperation.SplitPanelByLines || Operation == LoadPanelOperation.MergePanels || chkDeleteOriginal.Checked;
         }
     }
 }

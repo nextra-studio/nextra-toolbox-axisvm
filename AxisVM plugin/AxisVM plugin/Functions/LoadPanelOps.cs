@@ -15,18 +15,19 @@ namespace AxisVM_plugin.Functions
         public int SplittersUsed;
         public int LoadsCopied;
 
-        /// <summary>Panel to domain: new domain indices. Domain to panel and split: new panel UIDs.</summary>
+        /// <summary>Panel to domain: new domain indices. Domain to panel, split and merge: new panel UIDs.</summary>
         public readonly List<int> Created = new List<int>();
         public readonly List<string> Notes = new List<string>();
     }
 
     /// <summary>
-    /// The three load panel operations, free of any UI so they can be driven from the add-on and from the
-    /// live checks alike:
+    /// The load panel operations, free of any UI so they can be driven from the add-on and from the live
+    /// checks alike:
     ///
     ///   1. Load Panel -> Domain     each panel's contour becomes a domain
     ///   2. Domain -> Load Panel     each domain gets a load panel (IAxisVMLoadPanels.AddFromDomain)
     ///   3. Split Load Panel         lines running edge to edge cut panels into pieces
+    ///   4. Merge Load Panels        coplanar panels that share edges become one panel
     ///
     /// Everything that has to survive a mutation is tracked by UID rather than by index. Deleting a panel
     /// renumbers the panel collection and IAxisVMLine.SplitByNode renumbers the line collection (both halves
@@ -385,11 +386,12 @@ namespace AxisVM_plugin.Functions
             foreach (int pieceUid in finalPieces)
             {
                 int pieceIndex = PanelIndex(model, pieceUid);
-                if (pieceIndex <= 0) continue;
+                Ring pieceRing;
+                if (pieceIndex <= 0 || !BuildRing(model, pieceIndex, out pieceRing)) continue;
 
                 foreach (RLoadPanelLinear load in loads)
                 {
-                    RLoadPanelLinear copy = load;
+                    RLoadPanelLinear copy = Reexpress(load, pieceRing.Points);
                     copy.LoadPanelId = pieceIndex;
                     int rc = 0;
                     try { rc = model.Loads.AddLoadPanelLinear(ref copy); } catch { }
@@ -554,8 +556,13 @@ namespace AxisVM_plugin.Functions
         {
             ring = new Ring();
             if (panelId <= 0) return false;
+            return BuildRing(model, ContourLineIds(model, panelId), out ring);
+        }
 
-            List<int> ids = ContourLineIds(model, panelId);
+        /// <summary>Chains the given lines into one closed ring; false when they do not form exactly one loop.</summary>
+        private static bool BuildRing(IAxisVMModel model, List<int> ids, out Ring ring)
+        {
+            ring = new Ring();
             if (ids.Count < 3) return false;
 
             Dictionary<int, int> startOf = new Dictionary<int, int>();
@@ -714,14 +721,308 @@ namespace AxisVM_plugin.Functions
         }
 
         // ==================================================================
+        // Operation 4 - merge panels
+        // ==================================================================
+
+        /// <summary>One selected panel as the merge needs it, read before anything is changed.</summary>
+        private sealed class MergeSource
+        {
+            public int Uid;
+            public int Index;
+            public List<int> EdgeUids = new List<int>();
+            public HashSet<int> LoadedUids;
+            public ELongBoolean Auto;
+            public List<RLoadPanelLinear> Loads;
+            public int OtherLoads;
+            public List<RNode> Points;
+        }
+
+        /// <summary>
+        /// Merges the selected panels. Panels that share contour lines form a group and each group becomes one
+        /// panel: its outline is every edge used by exactly one panel of the group, the shared edges fall
+        /// inside. A group is left alone, with a reason, when merging would change the loading or the geometry.
+        /// </summary>
+        public static LoadPanelOpResult MergePanels(IAxisVMModel model, IList<int> panelUids)
+        {
+            LoadPanelOpResult r = new LoadPanelOpResult();
+            if (panelUids.Count < 2) { r.Notes.Add("Select at least two load panels to merge."); return r; }
+
+            List<MergeSource> sources = new List<MergeSource>();
+            foreach (int uid in panelUids)
+            {
+                int idx = PanelIndex(model, uid);
+                if (idx <= 0) continue;
+
+                Ring ring;
+                if (!BuildRing(model, idx, out ring))
+                {
+                    r.Notes.Add(string.Format("Panel {0}: its contour is not built from lines, so it cannot be merged.", idx));
+                    continue;
+                }
+
+                MergeSource src = new MergeSource { Uid = uid, Index = idx, Points = ring.Points, LoadedUids = ReadLoadedEdgeUids(model, idx) };
+                foreach (int lineId in ring.Lines) src.EdgeUids.Add(model.Lines.get_UID(lineId));
+                try { src.Auto = model.LoadPanels.Item[idx].Auto; } catch { }
+                src.Loads = ReadPanelLinearLoads(model, idx, out src.OtherLoads);
+                sources.Add(src);
+            }
+
+            foreach (List<MergeSource> group in GroupBySharedEdges(sources))
+            {
+                if (group.Count == 1)
+                {
+                    r.Notes.Add(string.Format("Panel {0} shares no edge line with another selected panel, so it was left as it is.", group[0].Index));
+                    continue;
+                }
+                MergeGroup(model, group, r);
+            }
+            return r;
+        }
+
+        private static void MergeGroup(IAxisVMModel model, List<MergeSource> group, LoadPanelOpResult r)
+        {
+            string label = "Panels " + string.Join(", ", group.Select(g => g.Index));
+
+            if (!Coplanar(group[0].Points, group.SelectMany(g => g.Points)))
+            {
+                r.Notes.Add(label + " were not merged: they do not lie in one plane.");
+                return;
+            }
+
+            if (group.Any(g => g.Auto != group[0].Auto))
+            {
+                r.Notes.Add(label + " were not merged: some distribute their load automatically (Auto) and some do not.");
+                return;
+            }
+
+            if (group.Any(g => g.OtherLoads > 0))
+            {
+                r.Notes.Add(label + " were not merged: they carry loads other than uniform/linear area loads, which cannot be carried over.");
+                return;
+            }
+
+            if (group.Any(g => !SameLoads(group[0].Loads, g.Loads)))
+            {
+                r.Notes.Add(label + " were not merged: they carry different loads, so one panel cannot reproduce them.");
+                return;
+            }
+
+            // Outline = edges used once; edges used twice are shared, so they end up inside the merged panel.
+            Dictionary<int, int> uses = new Dictionary<int, int>();
+            foreach (int uid in group.SelectMany(g => g.EdgeUids))
+            {
+                int n;
+                uses.TryGetValue(uid, out n);
+                uses[uid] = n + 1;
+            }
+
+            List<int> outline = uses.Where(kv => kv.Value == 1).Select(kv => LineIndex(model, kv.Key)).ToList();
+            Ring ring;
+            if (outline.Any(id => id <= 0) || !BuildRing(model, outline, out ring))
+            {
+                r.Notes.Add(label + " were not merged: their outline is not one closed loop (they enclose a hole, or meet only at a corner).");
+                return;
+            }
+
+            HashSet<int> loaded = new HashSet<int>(group.SelectMany(g => g.LoadedUids));
+            int loadedInside = uses.Count(kv => kv.Value > 1 && loaded.Contains(kv.Key));
+
+            Array ids = ToComArray(ring.Lines);
+            int panelId;
+            try { panelId = model.LoadPanels.AddFromLineIDs(ref ids); }
+            catch (Exception ex) { r.Notes.Add(label + " were not merged: AxisVM rejected the merged panel (" + ex.Message + ")."); return; }
+            if (panelId <= 0) { r.Notes.Add(label + " were not merged: AxisVM rejected the merged panel (code " + panelId + ")."); return; }
+
+            int newUid = model.LoadPanels.get_UID(panelId);
+            try
+            {
+                IAxisVMLoadPanel panel = model.LoadPanels.Item[panelId];
+                panel.Auto = group[0].Auto;
+                if (group[0].Auto == ELongBoolean.lbFalse)
+                {
+                    List<int> loadedOutline = ring.Lines.Where(id => loaded.Contains(model.Lines.get_UID(id))).ToList();
+                    if (loadedOutline.Count > 0)
+                    {
+                        Array arr = ToComArray(loadedOutline);
+                        panel.SetLines(ref arr);
+                    }
+                }
+            }
+            catch { }
+
+            // Deleting the originals renumbers the panels, so the merged panel is found again by UID.
+            r.Deleted += DeletePanels(model, group.Select(g => g.Uid).ToList());
+            int mergedIndex = PanelIndex(model, newUid);
+
+            foreach (RLoadPanelLinear load in group[0].Loads)
+            {
+                RLoadPanelLinear copy = Reexpress(load, ring.Points);
+                copy.LoadPanelId = mergedIndex;
+                int rc = 0;
+                try { rc = model.Loads.AddLoadPanelLinear(ref copy); } catch { }
+                if (rc > 0) r.LoadsCopied++;
+                else r.Notes.Add(string.Format("Merged panel {0}: a load (case {1}) could not be applied (code {2}).", mergedIndex, load.LoadCaseId, rc));
+            }
+
+            r.Converted += group.Count;
+            r.Created.Add(newUid);
+            if (loadedInside > 0)
+                r.Notes.Add(string.Format("Merged panel {0}: {1} shared edge(s) carried load and are now inside the panel, so they no longer receive any.", mergedIndex, loadedInside));
+        }
+
+        /// <summary>Connected groups of panels, where two panels are connected when they share a contour line.</summary>
+        private static List<List<MergeSource>> GroupBySharedEdges(List<MergeSource> sources)
+        {
+            int[] parent = Enumerable.Range(0, sources.Count).ToArray();
+            Func<int, int> find = null;
+            find = i => parent[i] == i ? i : (parent[i] = find(parent[i]));
+
+            Dictionary<int, int> ownerOfEdge = new Dictionary<int, int>();
+            for (int i = 0; i < sources.Count; i++)
+            {
+                foreach (int uid in sources[i].EdgeUids)
+                {
+                    int other;
+                    if (ownerOfEdge.TryGetValue(uid, out other)) parent[find(i)] = find(other);
+                    else ownerOfEdge[uid] = i;
+                }
+            }
+
+            return Enumerable.Range(0, sources.Count)
+                .GroupBy(find)
+                .Select(g => g.Select(i => sources[i]).ToList())
+                .ToList();
+        }
+
+        /// <summary>
+        /// True when two panels carry the same load field, so one merged panel reproduces both: every load
+        /// pairs with one of the same case, component and kind whose values agree everywhere on the plane.
+        /// </summary>
+        private static bool SameLoads(List<RLoadPanelLinear> a, List<RLoadPanelLinear> b)
+        {
+            if (a.Count != b.Count) return false;
+
+            List<RLoadPanelLinear> unmatched = new List<RLoadPanelLinear>(b);
+            foreach (RLoadPanelLinear la in a)
+            {
+                int hit = unmatched.FindIndex(lb =>
+                    lb.LoadCaseId == la.LoadCaseId && lb.Component == la.Component &&
+                    lb.DistributionType == la.DistributionType && lb.LoadDistributionType == la.LoadDistributionType &&
+                    Math.Abs(Evaluate(la, Point(lb.x1, lb.y1, lb.z1)) - lb.P1) < 1e-6 &&
+                    Math.Abs(Evaluate(la, Point(lb.x2, lb.y2, lb.z2)) - lb.P2) < 1e-6 &&
+                    Math.Abs(Evaluate(la, Point(lb.x3, lb.y3, lb.z3)) - lb.P3) < 1e-6);
+                if (hit < 0) return false;
+                unmatched.RemoveAt(hit);
+            }
+            return true;
+        }
+
+        // ==================================================================
+        // Linear load fields
+        // ==================================================================
+
+        /// <summary>
+        /// The load value at <paramref name="p"/>. A constant load is the same everywhere; a linear one varies
+        /// over the plane through its three reference points, with P1..P3 the values at those points.
+        /// </summary>
+        private static double Evaluate(RLoadPanelLinear l, RNode p)
+        {
+            if (l.LoadDistributionType != ELoadDistributionType.ldtLinear) return l.P1;
+
+            double s, t;
+            if (!PlaneCoordinates(Point(l.x1, l.y1, l.z1), Point(l.x2, l.y2, l.z2), Point(l.x3, l.y3, l.z3), p, out s, out t)) return l.P1;
+            return l.P1 + s * (l.P2 - l.P1) + t * (l.P3 - l.P1);
+        }
+
+        /// <summary>
+        /// The same load placed on another panel. AxisVM rejects a linear load whose reference points are not on
+        /// the panel, so those are moved to three corners of <paramref name="outline"/> and the values there are
+        /// taken from the original field. A constant load is returned unchanged.
+        /// </summary>
+        private static RLoadPanelLinear Reexpress(RLoadPanelLinear l, List<RNode> outline)
+        {
+            if (l.LoadDistributionType != ELoadDistributionType.ldtLinear || outline.Count < 3) return l;
+
+            // Corner 0, the corner farthest from it, and the corner farthest off the line between those two:
+            // the widest triangle keeps the interpolation well conditioned.
+            RNode a = outline[0];
+            RNode b = outline.OrderByDescending(q => Dist2(a, q)).First();
+            RNode c = outline.OrderByDescending(q => TriangleArea2(a, b, q)).First();
+
+            RLoadPanelLinear r = l;
+            r.x1 = a.x; r.y1 = a.y; r.z1 = a.z;
+            r.x2 = b.x; r.y2 = b.y; r.z2 = b.z;
+            r.x3 = c.x; r.y3 = c.y; r.z3 = c.z;
+            r.P1 = Evaluate(l, a);
+            r.P2 = Evaluate(l, b);
+            r.P3 = Evaluate(l, c);
+            return r;
+        }
+
+        /// <summary>Coordinates (s, t) of p in a + s(b - a) + t(c - a), least squares so a point just off the plane still resolves.</summary>
+        private static bool PlaneCoordinates(RNode a, RNode b, RNode c, RNode p, out double s, out double t)
+        {
+            double ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+            double vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+            double wx = p.x - a.x, wy = p.y - a.y, wz = p.z - a.z;
+
+            double uu = ux * ux + uy * uy + uz * uz, vv = vx * vx + vy * vy + vz * vz, uv = ux * vx + uy * vy + uz * vz;
+            double wu = wx * ux + wy * uy + wz * uz, wv = wx * vx + wy * vy + wz * vz;
+            double det = uu * vv - uv * uv;
+
+            s = t = 0;
+            if (Math.Abs(det) < 1e-12) return false;
+            s = (wu * vv - wv * uv) / det;
+            t = (wv * uu - wu * uv) / det;
+            return true;
+        }
+
+        private static RNode Point(double x, double y, double z) { return new RNode { x = x, y = y, z = z }; }
+
+        private static double Dist2(RNode a, RNode b)
+        {
+            double dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+            return dx * dx + dy * dy + dz * dz;
+        }
+
+        private static double TriangleArea2(RNode a, RNode b, RNode c)
+        {
+            double ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+            double vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+            double cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+            return cx * cx + cy * cy + cz * cz;
+        }
+
+        /// <summary>True when every point lies within tolerance of the plane of <paramref name="outline"/>.</summary>
+        private static bool Coplanar(List<RNode> outline, IEnumerable<RNode> points)
+        {
+            // Newell normal: robust for any simple polygon, convex or not.
+            double nx = 0, ny = 0, nz = 0;
+            for (int i = 0; i < outline.Count; i++)
+            {
+                RNode a = outline[i], b = outline[(i + 1) % outline.Count];
+                nx += (a.y - b.y) * (a.z + b.z);
+                ny += (a.z - b.z) * (a.x + b.x);
+                nz += (a.x - b.x) * (a.y + b.y);
+            }
+            double len = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+            if (len < 1e-12) return false;
+            nx /= len; ny /= len; nz /= len;
+
+            RNode o = outline[0];
+            return points.All(p => Math.Abs((p.x - o.x) * nx + (p.y - o.y) * ny + (p.z - o.z) * nz) <= OnEdgeToleranceM);
+        }
+
+        // ==================================================================
         // Loads
         // ==================================================================
 
         /// <summary>
         /// Uniform / linear area loads sitting on a panel, as records ready for AddLoadPanelLinear. There is
-        /// no typed getter for them; GetLoad returns the record bytes, and a 120-byte record whose case and
-        /// panel fields match the load's own is decoded as RLoadPanelLinear. Anything else on the panel is
-        /// only counted, so the caller can say it was not carried over.
+        /// no typed getter for them; GetLoad returns the record bytes: 5 x int32 (case, panel, distribution,
+        /// load distribution, component), 4 bytes padding, then 3 load doubles and the 3 plane points (x1..x3,
+        /// y1..y3, z1..z3). A 120-byte record whose case and panel fields match the load's own is decoded.
+        /// Anything else on the panel is only counted, so the caller can say it was not carried over.
         /// </summary>
         private static List<RLoadPanelLinear> ReadPanelLinearLoads(IAxisVMModel model, int panelId, out int otherLoads)
         {
@@ -739,19 +1040,34 @@ namespace AxisVM_plugin.Functions
                 int caseId = 0;
                 try { caseId = model.Loads.get_LoadCaseId(i); } catch { }
 
+                int distribution = bytes != null && bytes.Length == PanelLinearLoadBytes ? BitConverter.ToInt32(bytes, 12) : -1;
+                int component = bytes != null && bytes.Length == PanelLinearLoadBytes ? BitConverter.ToInt32(bytes, 16) : -1;
+
                 if (bytes != null && bytes.Length == PanelLinearLoadBytes &&
-                    BitConverter.ToInt32(bytes, 0) == caseId && BitConverter.ToInt32(bytes, 4) == panelId)
+                    BitConverter.ToInt32(bytes, 0) == caseId && BitConverter.ToInt32(bytes, 4) == panelId &&
+                    (distribution == (int)ELoadDistributionType.ldtConst || distribution == (int)ELoadDistributionType.ldtLinear) &&
+                    component >= 0 && component <= 2)
                 {
                     RLoadPanelLinear d = new RLoadPanelLinear();
                     d.LoadCaseId = caseId;
                     d.LoadPanelId = panelId;
                     d.DistributionType = (EDistributionType)BitConverter.ToInt32(bytes, 8);
-                    d.LoadDistributionType = (ELoadDistributionType)BitConverter.ToInt32(bytes, 12);
-                    d.Component = (EAxis)BitConverter.ToInt32(bytes, 16);
-                    // 4 bytes of padding align the doubles on 8.
-                    d.P1 = BitConverter.ToDouble(bytes, 24);
-                    d.P2 = BitConverter.ToDouble(bytes, 32);
-                    d.P3 = BitConverter.ToDouble(bytes, 40);
+                    d.LoadDistributionType = (ELoadDistributionType)distribution;
+                    d.Component = (EAxis)component;
+
+                    // 4 bytes of padding align the doubles on 8. The three doubles at 24 are not P1..P3 for a
+                    // constant load: AxisVM stores it as a vector, the value in the X, Y or Z slot of its
+                    // component. Only a linear load stores P1, P2, P3 there (values at the three plane points).
+                    if (distribution == (int)ELoadDistributionType.ldtConst)
+                    {
+                        d.P1 = d.P2 = d.P3 = BitConverter.ToDouble(bytes, 24 + 8 * component);
+                    }
+                    else
+                    {
+                        d.P1 = BitConverter.ToDouble(bytes, 24);
+                        d.P2 = BitConverter.ToDouble(bytes, 32);
+                        d.P3 = BitConverter.ToDouble(bytes, 40);
+                    }
                     d.x1 = BitConverter.ToDouble(bytes, 48);
                     d.x2 = BitConverter.ToDouble(bytes, 56);
                     d.x3 = BitConverter.ToDouble(bytes, 64);
