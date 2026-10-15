@@ -1,5 +1,7 @@
 # End Pin Assign Addon
 
+[Illustrated user guide](../user-guide/end-pins.md)
+
 ## Overview
 The End Pin Assign Addon is designed to automatically assign structural pins (hinges or semi-rigid connections) to the true "free ends" of continuous structural lines. This automates the tedious process of manually identifying which nodes in a structural model should have moment releases to avoid unwanted rigid moment transfers in truss-like or hinged structural systems.
 

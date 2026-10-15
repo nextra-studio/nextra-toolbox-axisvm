@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Override with /p:AxisVMDir=... when AxisVM is installed elsewhere. -->
+    <AxisVMDir Condition="'$(AxisVMDir)' == ''">C:\AXISVM X8</AxisVMDir>
+  </PropertyGroup>
+</Project>

@@ -1,5 +1,7 @@
 # Reaction Transfer Addon
 
+[Illustrated user guide](../user-guide/reaction-transfer.md)
+
 ## Overview
 Transfers support reactions from a source model into a target model as **nodal point loads** — typically to
 hand superstructure reactions down to a substructure/foundation model without re-typing them.

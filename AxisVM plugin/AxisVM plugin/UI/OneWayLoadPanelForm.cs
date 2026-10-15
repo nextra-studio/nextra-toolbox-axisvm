@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -54,8 +54,9 @@ namespace AxisVM_plugin.UI
 
         private void InitializeComponent(string selectionText, List<string> loadCases)
         {
+            Theme.Initialize(this);
             Text = "One-Way Load Panel";
-            ClientSize = new Size(470, 640);
+            ClientSize = new Size(560, 680);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -82,7 +83,7 @@ namespace AxisVM_plugin.UI
             Controls.Add(header);
 
             // ---- span direction --------------------------------------------
-            GroupBox grpSpan = new GroupBox { Text = "Span direction (the slab spans this way)", Location = new Point(12, 74), Size = new Size(446, 82) };
+            GroupBox grpSpan = new GroupBox { Text = "Span direction (the slab spans this way)", Location = new Point(12, 74), Size = new Size(536, 100) };
             // Auto follows each panel's own edges (not global X/Y), so it also suits rotated bays.
             radAuto = new RadioButton { Text = "Auto - shorter span", Location = new Point(12, 22), AutoSize = true };
             radAutoLong = new RadioButton { Text = "Auto - longer span", Location = new Point(170, 22), AutoSize = true };
@@ -96,10 +97,10 @@ namespace AxisVM_plugin.UI
             Controls.Add(grpSpan);
 
             // ---- edge strips -------------------------------------------------
-            GroupBox grpStrips = new GroupBox { Text = "Edge strips", Location = new Point(12, 164), Size = new Size(446, 92) };
+            GroupBox grpStrips = new GroupBox { Text = "Edge strips", Location = new Point(12, 182), Size = new Size(536, 100) };
             chkStrips = new CheckBox { Text = "Split off a strip along each edge beam", Location = new Point(12, 22), AutoSize = true };
             Label lblWidth = new Label { Text = "Strip width = joist spacing [mm]", Location = new Point(30, 50), AutoSize = true };
-            txtStripWidth = new TextBox { Location = new Point(230, 47), Size = new Size(70, 23) };
+            txtStripWidth = new TextBox { Location = new Point(260, 47), Size = new Size(70, 23) };
             Label lblStripHint = new Label
             {
                 Text = "The strip loads the edge beam; the centre spans to the supports.",
@@ -113,29 +114,29 @@ namespace AxisVM_plugin.UI
             Controls.Add(grpStrips);
 
             // ---- load ----------------------------------------------------------
-            GroupBox grpLoad = new GroupBox { Text = "Load", Location = new Point(12, 264), Size = new Size(446, 82) };
+            GroupBox grpLoad = new GroupBox { Text = "Load", Location = new Point(12, 290), Size = new Size(536, 100) };
             if (convert)
             {
                 grpLoad.Controls.Add(new Label
                 {
                     Text = "The loads on each panel (area, polygon and point loads) are moved\nonto its new one-way panels, same load case and intensity.",
                     Location = new Point(12, 24),
-                    Size = new Size(420, 40)
+                    Size = new Size(508, 52)
                 });
             }
             else
             {
                 chkLoad = new CheckBox { Text = "Apply an area load", Location = new Point(12, 22), AutoSize = true };
-                cboLoadCase = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(150, 20), Size = new Size(284, 23) };
+                cboLoadCase = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(190, 20), Size = new Size(334, 23) };
                 foreach (string name in loadCases) cboLoadCase.Items.Add(name);
                 Label lblQ = new Label { Text = "q [kN/m2] (+ = downward)", Location = new Point(30, 52), AutoSize = true };
-                txtLoad = new TextBox { Location = new Point(190, 49), Size = new Size(70, 23) };
+                txtLoad = new TextBox { Location = new Point(230, 49), Size = new Size(70, 23) };
                 grpLoad.Controls.AddRange(new Control[] { chkLoad, cboLoadCase, lblQ, txtLoad });
                 chkLoad.CheckedChanged += OnChanged;
                 if (loadCases.Count == 0)
                 {
                     chkLoad.Enabled = false;
-                    chkLoad.Text = "Apply an area load (no load case in the model)";
+                    chkLoad.Text = "No load case available";
                 }
             }
             Controls.Add(grpLoad);
@@ -143,8 +144,8 @@ namespace AxisVM_plugin.UI
             // ---- preview -------------------------------------------------------
             picPreview = new PictureBox
             {
-                Location = new Point(12, 356),
-                Size = new Size(446, 200),
+                Location = new Point(12, 400),
+                Size = new Size(536, 200),
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.White
             };
@@ -152,14 +153,14 @@ namespace AxisVM_plugin.UI
             Controls.Add(picPreview);
 
             // ---- advanced + buttons --------------------------------------------
-            Controls.Add(new Label { Text = "Angle tolerance [deg]", Location = new Point(12, 571), AutoSize = true });
-            txtTolerance = new TextBox { Location = new Point(150, 568), Size = new Size(50, 23) };
+            Controls.Add(new Label { Text = "Angle tolerance [deg]", Location = new Point(12, 620), AutoSize = true });
+            txtTolerance = new TextBox { Location = new Point(158, 617), Size = new Size(50, 23) };
             Controls.Add(txtTolerance);
             Controls.Add(new Label
             {
                 Text = "Edges and inner beams at 90 +/- this\nangle to the span take load.",
                 ForeColor = SystemColors.GrayText,
-                Location = new Point(206, 563),
+                Location = new Point(224, 612),
                 AutoSize = true
             });
 
@@ -170,6 +171,7 @@ namespace AxisVM_plugin.UI
             Controls.Add(btnCancel);
             AcceptButton = btnOk;
             CancelButton = btnCancel;
+            Theme.Apply(this, convert ? "Convert to one-way panels" : "Create one-way panels", selectionText, true);
         }
 
         private void RestoreSettings(int loadCaseCount)
@@ -216,112 +218,120 @@ namespace AxisVM_plugin.UI
         private void PicPreview_Paint(object sender, PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            // A 2:1 bay, X to the right, Y up. Auto picks its shorter span (Y).
-            Rectangle bay = new Rectangle(70, 28, 300, 130);
-            double spanDeg = 90.0;
-            double angle;
-            if (Direction == DirX || Direction == DirAutoLong) spanDeg = 0.0;
-            else if (Direction == DirAngle && OneWayPanelOptions.TryParseNumber(txtAngle.Text, out angle)) spanDeg = angle;
-            double folded = ((spanDeg % 180.0) + 180.0) % 180.0;
-            bool spanAlongX = folded < 45.0 || folded > 135.0;
-
-            // Receiving supports are the sides across the span; the other two are edge beams.
-            Point tl = new Point(bay.Left, bay.Top), tr = new Point(bay.Right, bay.Top);
-            Point bl = new Point(bay.Left, bay.Bottom), br = new Point(bay.Right, bay.Bottom);
-            Point[][] supports = spanAlongX ? new[] { new[] { tl, bl }, new[] { tr, br } } : new[] { new[] { tl, tr }, new[] { bl, br } };
-            Point[][] beams = spanAlongX ? new[] { new[] { tl, tr }, new[] { bl, br } } : new[] { new[] { tl, bl }, new[] { tr, br } };
-
-            bool strips = chkStrips.Checked;
-            const int strip = 18;
-            if (strips)
+            // Draw in the original preview coordinate system, so DPI scaling also scales its legend.
+            GraphicsState saved = g.Save();
+            float scale = Math.Min(picPreview.ClientSize.Width / 536f, picPreview.ClientSize.Height / 200f);
+            g.ScaleTransform(scale, scale);
+            using (Font previewFont = new Font("Segoe UI", 9F))
             {
-                using (Brush fill = new SolidBrush(Color.FromArgb(60, StripColour)))
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                // A 2:1 bay, X to the right, Y up. Auto picks its shorter span (Y).
+                Rectangle bay = new Rectangle(70, 28, 300, 130);
+                double spanDeg = 90.0;
+                double angle;
+                if (Direction == DirX || Direction == DirAutoLong) spanDeg = 0.0;
+                else if (Direction == DirAngle && OneWayPanelOptions.TryParseNumber(txtAngle.Text, out angle)) spanDeg = angle;
+                double folded = ((spanDeg % 180.0) + 180.0) % 180.0;
+                bool spanAlongX = folded < 45.0 || folded > 135.0;
+
+                // Receiving supports are the sides across the span; the other two are edge beams.
+                Point tl = new Point(bay.Left, bay.Top), tr = new Point(bay.Right, bay.Top);
+                Point bl = new Point(bay.Left, bay.Bottom), br = new Point(bay.Right, bay.Bottom);
+                Point[][] supports = spanAlongX ? new[] { new[] { tl, bl }, new[] { tr, br } } : new[] { new[] { tl, tr }, new[] { bl, br } };
+                Point[][] beams = spanAlongX ? new[] { new[] { tl, tr }, new[] { bl, br } } : new[] { new[] { tl, bl }, new[] { tr, br } };
+
+                bool strips = chkStrips.Checked;
+                const int strip = 18;
+                if (strips)
                 {
-                    if (spanAlongX)
+                    using (Brush fill = new SolidBrush(Color.FromArgb(60, StripColour)))
                     {
-                        g.FillRectangle(fill, bay.Left, bay.Top, bay.Width, strip);
-                        g.FillRectangle(fill, bay.Left, bay.Bottom - strip, bay.Width, strip);
+                        if (spanAlongX)
+                        {
+                            g.FillRectangle(fill, bay.Left, bay.Top, bay.Width, strip);
+                            g.FillRectangle(fill, bay.Left, bay.Bottom - strip, bay.Width, strip);
+                        }
+                        else
+                        {
+                            g.FillRectangle(fill, bay.Left, bay.Top, strip, bay.Height);
+                            g.FillRectangle(fill, bay.Right - strip, bay.Top, strip, bay.Height);
+                        }
                     }
-                    else
+                    using (Pen inset = new Pen(Color.Gray, 1) { DashStyle = DashStyle.Dash })
                     {
-                        g.FillRectangle(fill, bay.Left, bay.Top, strip, bay.Height);
-                        g.FillRectangle(fill, bay.Right - strip, bay.Top, strip, bay.Height);
+                        if (spanAlongX)
+                        {
+                            g.DrawLine(inset, bay.Left, bay.Top + strip, bay.Right, bay.Top + strip);
+                            g.DrawLine(inset, bay.Left, bay.Bottom - strip, bay.Right, bay.Bottom - strip);
+                        }
+                        else
+                        {
+                            g.DrawLine(inset, bay.Left + strip, bay.Top, bay.Left + strip, bay.Bottom);
+                            g.DrawLine(inset, bay.Right - strip, bay.Top, bay.Right - strip, bay.Bottom);
+                        }
                     }
                 }
-                using (Pen inset = new Pen(Color.Gray, 1) { DashStyle = DashStyle.Dash })
+
+                using (Pen support = new Pen(Accent, 5))
+                using (Pen beam = new Pen(strips ? StripColour : Color.DarkGray, strips ? 5 : 2))
                 {
-                    if (spanAlongX)
+                    foreach (Point[] s in beams) g.DrawLine(beam, s[0], s[1]);
+                    foreach (Point[] s in supports) g.DrawLine(support, s[0], s[1]);
+                }
+
+                // Span arrows in the centre region.
+                double rad = spanDeg * Math.PI / 180.0;
+                float ux = (float)Math.Cos(rad), uy = -(float)Math.Sin(rad);
+                using (Pen arrow = new Pen(Color.Firebrick, 2))
+                using (AdjustableArrowCap cap = new AdjustableArrowCap(4, 4))
+                {
+                    arrow.CustomStartCap = cap;
+                    arrow.CustomEndCap = cap;
+                    float cx = bay.Left + bay.Width / 2f, cy = bay.Top + bay.Height / 2f;
+                    float half = spanAlongX ? 70f : 38f;
+                    float px = -uy, py = ux; // across the span
+                    for (int k = -1; k <= 1; k++)
                     {
-                        g.DrawLine(inset, bay.Left, bay.Top + strip, bay.Right, bay.Top + strip);
-                        g.DrawLine(inset, bay.Left, bay.Bottom - strip, bay.Right, bay.Bottom - strip);
-                    }
-                    else
-                    {
-                        g.DrawLine(inset, bay.Left + strip, bay.Top, bay.Left + strip, bay.Bottom);
-                        g.DrawLine(inset, bay.Right - strip, bay.Top, bay.Right - strip, bay.Bottom);
+                        float ox = cx + px * 32f * k, oy = cy + py * 32f * k;
+                        g.DrawLine(arrow, ox - ux * half, oy - uy * half, ox + ux * half, oy + uy * half);
                     }
                 }
-            }
 
-            using (Pen support = new Pen(Accent, 5))
-            using (Pen beam = new Pen(strips ? StripColour : Color.DarkGray, strips ? 5 : 2))
-            {
-                foreach (Point[] s in beams) g.DrawLine(beam, s[0], s[1]);
-                foreach (Point[] s in supports) g.DrawLine(support, s[0], s[1]);
-            }
-
-            // Span arrows in the centre region.
-            double rad = spanDeg * Math.PI / 180.0;
-            float ux = (float)Math.Cos(rad), uy = -(float)Math.Sin(rad);
-            using (Pen arrow = new Pen(Color.Firebrick, 2))
-            using (AdjustableArrowCap cap = new AdjustableArrowCap(4, 4))
-            {
-                arrow.CustomStartCap = cap;
-                arrow.CustomEndCap = cap;
-                float cx = bay.Left + bay.Width / 2f, cy = bay.Top + bay.Height / 2f;
-                float half = spanAlongX ? 70f : 38f;
-                float px = -uy, py = ux; // across the span
-                for (int k = -1; k <= 1; k++)
+                // Global axes and legend.
+                using (Pen axis = new Pen(Color.DimGray, 1))
+                using (AdjustableArrowCap cap = new AdjustableArrowCap(3, 3))
                 {
-                    float ox = cx + px * 32f * k, oy = cy + py * 32f * k;
-                    g.DrawLine(arrow, ox - ux * half, oy - uy * half, ox + ux * half, oy + uy * half);
+                    axis.CustomEndCap = cap;
+                    g.DrawLine(axis, 18, 178, 44, 178);
+                    g.DrawLine(axis, 18, 178, 18, 152);
+                }
+                using (Brush text = new SolidBrush(Color.DimGray))
+                {
+                    g.DrawString("X", previewFont, text, 46, 170);
+                    g.DrawString("Y", previewFont, text, 12, 136);
+                    DrawLegend(g, strips, previewFont);
+                    if (Direction == DirAuto) g.DrawString("auto: shorter span", previewFont, text, 300, 4);
+                    if (Direction == DirAutoLong) g.DrawString("auto: longer span", previewFont, text, 300, 4);
                 }
             }
-
-            // Global axes and legend.
-            using (Pen axis = new Pen(Color.DimGray, 1))
-            using (AdjustableArrowCap cap = new AdjustableArrowCap(3, 3))
-            {
-                axis.CustomEndCap = cap;
-                g.DrawLine(axis, 18, 178, 44, 178);
-                g.DrawLine(axis, 18, 178, 18, 152);
-            }
-            using (Brush text = new SolidBrush(Color.DimGray))
-            {
-                g.DrawString("X", Font, text, 46, 170);
-                g.DrawString("Y", Font, text, 12, 136);
-                DrawLegend(g, strips);
-                if (Direction == DirAuto) g.DrawString("auto: shorter span", Font, text, 300, 4);
-                if (Direction == DirAutoLong) g.DrawString("auto: longer span", Font, text, 300, 4);
-            }
+            g.Restore(saved);
         }
 
-        private void DrawLegend(Graphics g, bool strips)
+        private void DrawLegend(Graphics g, bool strips, Font previewFont)
         {
             int x = 80, y = 172;
             using (Brush b = new SolidBrush(Accent)) g.FillRectangle(b, x, y + 5, 16, 5);
-            g.DrawString("receiving support", Font, Brushes.DimGray, x + 20, y);
+            g.DrawString("receiving support", previewFont, Brushes.DimGray, x + 20, y);
             x += 140;
             if (strips)
             {
                 using (Brush b = new SolidBrush(StripColour)) g.FillRectangle(b, x, y + 5, 16, 5);
-                g.DrawString("edge strip -> edge beam", Font, Brushes.DimGray, x + 20, y);
+                g.DrawString("edge strip -> edge beam", previewFont, Brushes.DimGray, x + 20, y);
                 x += 170;
             }
             using (Pen p = new Pen(Color.Firebrick, 2)) g.DrawLine(p, x, y + 8, x + 16, y + 8);
-            g.DrawString("span", Font, Brushes.DimGray, x + 20, y);
+            g.DrawString("span", previewFont, Brushes.DimGray, x + 20, y);
         }
 
         // ------------------------------------------------------------------

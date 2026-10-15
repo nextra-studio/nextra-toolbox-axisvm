@@ -26,19 +26,20 @@ namespace AxisVM_plugin.UI
 
         private void InitializeComponent()
         {
+            Theme.Initialize(this);
             this.Text = "Modify Section Width/Depth";
-            this.Size = new Size(300, 200);
+            this.ClientSize = new Size(410, 170);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
 
             chkWidth = new CheckBox { Text = "Modify Width (mm):", Location = new Point(20, 30), AutoSize = true };
-            txtWidth = new TextBox { Text = "100", Location = new Point(140, 27), Size = new Size(100, 20), Enabled = false };
+            txtWidth = new TextBox { Text = "100", Location = new Point(230, 27), Size = new Size(100, 20), Enabled = false };
             chkWidth.CheckedChanged += (s, e) => txtWidth.Enabled = chkWidth.Checked;
 
             chkDepth = new CheckBox { Text = "Modify Depth (mm):", Location = new Point(20, 70), AutoSize = true };
-            txtDepth = new TextBox { Text = "200", Location = new Point(140, 67), Size = new Size(100, 20), Enabled = false };
+            txtDepth = new TextBox { Text = "200", Location = new Point(230, 67), Size = new Size(100, 20), Enabled = false };
             chkDepth.CheckedChanged += (s, e) => txtDepth.Enabled = chkDepth.Checked;
 
             this.Controls.Add(chkWidth);
@@ -55,6 +56,7 @@ namespace AxisVM_plugin.UI
 
             this.AcceptButton = btnOk;
             this.CancelButton = btnCancel;
+            Theme.Apply(this, "Section modifier", "Change the width or depth of selected rectangular sections.");
         }
 
         private void BtnOk_Click(object sender, EventArgs e)

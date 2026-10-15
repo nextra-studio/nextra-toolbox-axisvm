@@ -47,36 +47,8 @@ namespace AxisVM_plugin.Addons
         public int Addon_IsItemVisible(object iAxisVMApp) { return 1; }
         public int Addon_IsModalWindow { get { return 0; } }
 
-        public byte[] Addon_IconBitmap
-        {
-            get
-            {
-                using (var bmp = new Bitmap(16, 16))
-                {
-                    using (var g = Graphics.FromImage(bmp))
-                    {
-                        g.Clear(Color.Magenta); // Transparent color
-                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
-                        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.None;
+        public byte[] Addon_IconBitmap { get { return AxisVM_plugin.Core.AddonIcons.LoadPanelTools(); } }
 
-                        // A panel with a diagonal cut through it - convert / split.
-                        using (var pen = new Pen(Color.DarkGreen, 1))
-                        {
-                            g.DrawRectangle(pen, 2, 3, 11, 9);
-                        }
-                        using (var cut = new Pen(Color.Red, 1))
-                        {
-                            g.DrawLine(cut, 2, 12, 13, 3);
-                        }
-                    }
-                    using (var ms = new MemoryStream())
-                    {
-                        bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Bmp);
-                        return ms.ToArray();
-                    }
-                }
-            }
-        }
 
         public int Addon_IconBitmapTransparentColor { get { return ColorTranslator.ToWin32(Color.Magenta); } }
         public int Addon_ButtonPlaceFormId { get { return 0; } }

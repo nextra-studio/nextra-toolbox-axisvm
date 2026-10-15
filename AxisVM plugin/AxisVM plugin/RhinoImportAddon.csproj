@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -32,10 +32,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="AxisVMDotNetAddonPluginInterface_v1.0.FW4">
-      <HintPath>..\..\..\..\..\..\..\..\AXISVM X8\AxisVMDotNetAddonPluginInterface_v1.0.FW4.dll</HintPath>
+      <HintPath>$(AxisVMDir)\AxisVMDotNetAddonPluginInterface_v1.0.FW4.dll</HintPath>
     </Reference>
     <Reference Include="Interop.AxisVM.FW4">
-      <HintPath>..\..\..\..\..\..\..\..\AXISVM X8\Interop.AxisVM.FW4.dll</HintPath>
+      <HintPath>$(AxisVMDir)\Interop.AxisVM.FW4.dll</HintPath>
       <EmbedInteropTypes>True</EmbedInteropTypes>
     </Reference>
     <Reference Include="System" />
@@ -71,6 +71,8 @@
     <Compile Include="Core\Json.cs" />
     <Compile Include="Core\RhinoModelDto.cs" />
     <Compile Include="Core\AxisVMHelper.cs" />
+    <Compile Include="Core\AddonIcons.cs" />
+    <Compile Include="UI\Theme.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

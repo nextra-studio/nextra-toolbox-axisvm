@@ -47,37 +47,8 @@ namespace AxisVM_plugin.Addons
         public int Addon_IsItemVisible(object iAxisVMApp) { return 1; }
         public int Addon_IsModalWindow { get { return 0; } }
         
-        public byte[] Addon_IconBitmap 
-        { 
-            get 
-            { 
-                using (var bmp = new Bitmap(16, 16))
-                {
-                    using (var g = Graphics.FromImage(bmp))
-                    {
-                        g.Clear(Color.Magenta); // Transparent color
-                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
-                        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.None;
-                        
-                        using (var pen = new Pen(Color.DarkBlue, 1))
-                        {
-                            // Draw an arrow pointing down from a block
-                            g.FillRectangle(Brushes.DarkGray, 2, 1, 12, 3);
-                            g.FillRectangle(Brushes.LightGray, 2, 12, 12, 3);
-                            
-                            g.DrawLine(pen, 8, 4, 8, 10);
-                            g.DrawLine(pen, 8, 10, 5, 7);
-                            g.DrawLine(pen, 8, 10, 11, 7);
-                        }
-                    }
-                    using (var ms = new MemoryStream())
-                    {
-                        bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Bmp);
-                        return ms.ToArray();
-                    }
-                }
-            } 
-        }
+        public byte[] Addon_IconBitmap { get { return AxisVM_plugin.Core.AddonIcons.ReactionTransfer(); } }
+
         
         public int Addon_IconBitmapTransparentColor { get { return ColorTranslator.ToWin32(Color.Magenta); } }
         public int Addon_ButtonPlaceFormId { get { return 0; } }

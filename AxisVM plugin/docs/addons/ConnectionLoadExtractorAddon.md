@@ -1,5 +1,7 @@
 # Connection Load Extractor Addon
 
+[Illustrated user guide](../user-guide/connection-loads.md)
+
 ## Overview
 The Connection Load Extractor reads the end forces of selected beams and ribs at selected nodes, for selected load
 combinations, and reports them as the **force each member exerts on the node**. The loads are given in the member's

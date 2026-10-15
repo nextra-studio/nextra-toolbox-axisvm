@@ -52,4 +52,4 @@
   <ItemGroup>
     </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-<ItemGroup><Compile Include="../AxisVM plugin/Functions/EndPinAssignFunction.cs" /><Compile Include="../AxisVM plugin/UI/EndPinAssignForm.cs" /><Compile Include="EndPinAssignChecks.cs" /></ItemGroup></Project>
+<ItemGroup><Compile Include="../AxisVM plugin/Functions/EndPinAssignFunction.cs" /><Compile Include="../AxisVM plugin/UI/EndPinAssignForm.cs" /><Compile Include="../AxisVM plugin/UI/Theme.cs" /><Compile Include="EndPinAssignChecks.cs" /></ItemGroup></Project>

@@ -12,6 +12,7 @@ namespace AxisVM_plugin.UI
     {
         public OneWayPanelReportForm(string headline, List<string> notes, bool allGood)
         {
+            Theme.Initialize(this);
             Text = "One-Way Load Panel";
             ClientSize = new Size(560, notes.Count > 0 ? 380 : 140);
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -62,6 +63,7 @@ namespace AxisVM_plugin.UI
             ActiveControl = ok; // otherwise the notes box takes focus with all its text selected
             AcceptButton = ok;
             CancelButton = ok;
+            Theme.Apply(this, "One-way panel report", "Review the run summary and any notes before continuing.");
         }
     }
 }

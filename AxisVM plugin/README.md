@@ -1,5 +1,7 @@
 # AxisVM Plugin / Add-ons
 
+[Installation](docs/INSTALLATION.md) ? [Illustrated guide](docs/user-guide/README.md) ? [UI validation](docs/UI-REFRESH-VALIDATION.md)
+
 A set of C# (.NET Framework 4.8) add-ons for **AxisVM X8** (finite element software), plus a companion
 Rhino plugin (`AxisBridge`, in `../Rhino/`) that prepares geometry for import.
 
@@ -29,7 +31,7 @@ AxisVM plugin/                      <- AxisVM sources (repository root is one le
 
 | Menu text in AxisVM | Project / DLL | Docs |
 |---|---|---|
-| N. Rhino Import | RhinoImportAddon | (see source `Functions/RhinoImportLogic.cs`) |
+| N. Rhino Import | RhinoImportAddon | [Rhino Import guide](docs/user-guide/rhino-import.md) |
 | N. One-Way Load Panel (selected panels -> one-way, or lines -> new panels) | OneWayLoadPanelAddon | [docs/addons/OneWayLoadPanelAddon.md](docs/addons/OneWayLoadPanelAddon.md) |
 | N. Load Panel Tools | LoadPanelToolsAddon | [docs/addons/LoadPanelToolsAddon.md](docs/addons/LoadPanelToolsAddon.md) |
 | N. End Pin Assign (WIP) | EndPinAssignAddon | [docs/addons/EndPinAssignAddon.md](docs/addons/EndPinAssignAddon.md) |

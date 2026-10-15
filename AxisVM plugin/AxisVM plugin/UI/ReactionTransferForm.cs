@@ -75,9 +75,10 @@ namespace AxisVM_plugin.UI
 
         private void InitializeComponent()
         {
+            Theme.Initialize(this);
             this.Text = "Reaction Transfer";
             // ClientSize rather than Size, so the button row is positioned against real client coordinates.
-            this.ClientSize = new Size(460, 445);
+            this.ClientSize = new Size(610, 520);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
@@ -89,44 +90,44 @@ namespace AxisVM_plugin.UI
             // ---------------------------------------------------------------
             // Target model
             // ---------------------------------------------------------------
-            GroupBox gbTarget = new GroupBox() { Text = "Target Model", Location = new Point(xPos, yPos), Size = new Size(420, 105) };
+            GroupBox gbTarget = new GroupBox() { Text = "Target Model", Location = new Point(xPos, yPos), Size = new Size(570, 128) };
 
             rbNewFile = new RadioButton() { Text = "Create New File", Location = new Point(20, 20), AutoSize = true, Checked = true };
             rbExistingFile = new RadioButton() { Text = "Modify Existing File", Location = new Point(170, 20), AutoSize = true };
             rbNewFile.CheckedChanged += TargetMode_CheckedChanged;
 
-            txtFilePath = new TextBox() { Location = new Point(20, 46), Size = new Size(300, 20), ReadOnly = true };
-            btnBrowse = new Button() { Text = "Browse...", Location = new Point(330, 44), Size = new Size(75, 23) };
+            txtFilePath = new TextBox() { Location = new Point(20, 46), Size = new Size(420, 24), ReadOnly = true };
+            btnBrowse = new Button() { Text = "Browse...", Location = new Point(450, 44), Size = new Size(75, 23) };
             btnBrowse.Click += BtnBrowse_Click;
 
             lblTargetNote = new Label()
             {
                 Location = new Point(20, 72),
-                Size = new Size(385, 28),
+                Size = new Size(530, 44),
                 ForeColor = SystemColors.GrayText
             };
 
             gbTarget.Controls.AddRange(new Control[] { rbNewFile, rbExistingFile, txtFilePath, btnBrowse, lblTargetNote });
             this.Controls.Add(gbTarget);
-            yPos += 115;
+            yPos += 140;
 
             // ---------------------------------------------------------------
             // Result type
             // ---------------------------------------------------------------
-            GroupBox gbResultType = new GroupBox() { Text = "Result Type to Transfer", Location = new Point(xPos, yPos), Size = new Size(420, 135) };
+            GroupBox gbResultType = new GroupBox() { Text = "Result Type to Transfer", Location = new Point(xPos, yPos), Size = new Size(570, 150) };
             Label lblResultType = new Label() { Text = "Type:", Location = new Point(20, 25), AutoSize = true };
-            cbResultType = new ComboBox() { Location = new Point(70, 22), Size = new Size(250, 20), DropDownStyle = ComboBoxStyle.DropDownList };
+            cbResultType = new ComboBox() { Location = new Point(70, 22), Size = new Size(460, 24), DropDownStyle = ComboBoxStyle.DropDownList };
             cbResultType.Items.AddRange(new string[] { "Linear Static (Individual Cases)", "Non-Linear Results", "Envelopes" });
             cbResultType.SelectedIndex = 0; // Default to Linear Static
             cbResultType.SelectedIndexChanged += CbResultType_SelectedIndexChanged;
 
             Label lblEnvComponent = new Label() { Text = "Envelope of:", Location = new Point(20, 55), AutoSize = true };
-            cbEnvComponent = new ComboBox() { Location = new Point(95, 52), Size = new Size(90, 20), DropDownStyle = ComboBoxStyle.DropDownList };
+            cbEnvComponent = new ComboBox() { Location = new Point(115, 52), Size = new Size(90, 20), DropDownStyle = ComboBoxStyle.DropDownList };
             cbEnvComponent.Items.AddRange(new string[] { "Rx", "Ry", "Rz", "Rxx", "Ryy", "Rzz" });
             cbEnvComponent.SelectedIndex = 2; // Rz
 
-            Label lblEnvMinMax = new Label() { Text = "Min/Max:", Location = new Point(205, 55), AutoSize = true };
-            cbEnvMinMax = new ComboBox() { Location = new Point(265, 52), Size = new Size(90, 20), DropDownStyle = ComboBoxStyle.DropDownList };
+            Label lblEnvMinMax = new Label() { Text = "Min/Max:", Location = new Point(235, 55), AutoSize = true };
+            cbEnvMinMax = new ComboBox() { Location = new Point(305, 52), Size = new Size(90, 20), DropDownStyle = ComboBoxStyle.DropDownList };
             cbEnvMinMax.Items.AddRange(new string[] { "Max", "Min" });
             cbEnvMinMax.SelectedIndex = 0;
 
@@ -135,37 +136,37 @@ namespace AxisVM_plugin.UI
                 Text = "Note: Self-weight load cases cannot have loads added; reactions from them are skipped.\nEnvelope results are written to a load case named 'Transferred Reactions (Env)'.",
                 Location = new Point(20, 82),
                 AutoSize = false,
-                Size = new Size(385, 40),
-                ForeColor = Color.Red
+                Size = new Size(530, 58),
+                ForeColor = Color.Firebrick
             };
 
             gbResultType.Controls.AddRange(new Control[] { lblResultType, cbResultType, lblEnvComponent, cbEnvComponent, lblEnvMinMax, cbEnvMinMax, lblGravityWarn });
             this.Controls.Add(gbResultType);
-            yPos += 145;
+            yPos += 162;
 
             UpdateEnvelopeControls();
 
             // ---------------------------------------------------------------
             // Options
             // ---------------------------------------------------------------
-            GroupBox gbOptions = new GroupBox() { Text = "Options", Location = new Point(xPos, yPos), Size = new Size(420, 115) };
+            GroupBox gbOptions = new GroupBox() { Text = "Options", Location = new Point(xPos, yPos), Size = new Size(570, 140) };
 
             chkTransferSupports = new CheckBox() { Text = "Keep Existing Supports (new file only)", Location = new Point(20, 24), Checked = true, AutoSize = true };
 
             lblMatchTolerance = new Label() { Text = "Node match tolerance (mm):", Location = new Point(20, 54), AutoSize = true };
-            txtMatchTolerance = new TextBox() { Text = "1.0", Location = new Point(180, 51), Size = new Size(70, 20) };
+            txtMatchTolerance = new TextBox() { Text = "1.0", Location = new Point(230, 51), Size = new Size(70, 20) };
 
             lblMatchNote = new Label()
             {
                 Text = "Reactions are always applied as nodal point loads.",
                 Location = new Point(20, 80),
-                Size = new Size(385, 28),
+                Size = new Size(530, 44),
                 ForeColor = SystemColors.GrayText
             };
 
             gbOptions.Controls.AddRange(new Control[] { chkTransferSupports, lblMatchTolerance, txtMatchTolerance, lblMatchNote });
             this.Controls.Add(gbOptions);
-            yPos += 125;
+            yPos += 152;
 
             // ---------------------------------------------------------------
             // Action buttons
@@ -182,6 +183,7 @@ namespace AxisVM_plugin.UI
 
             NodeMatchToleranceM = 0.001;
             UpdateTargetModeControls();
+            Theme.Apply(this, "Reaction transfer", "Transfer selected support reactions to a new or existing model.");
         }
 
         private void CbResultType_SelectedIndexChanged(object sender, EventArgs e)

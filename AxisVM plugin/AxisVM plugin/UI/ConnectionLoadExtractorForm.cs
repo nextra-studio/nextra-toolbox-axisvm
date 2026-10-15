@@ -32,8 +32,9 @@ namespace AxisVM_plugin.UI
 
         private void InitializeComponent(string selectionSummary, IList<string> comboNames)
         {
+            Theme.Initialize(this);
             Text = "Connection Load Extractor";
-            ClientSize = new Size(420, 520);
+            ClientSize = new Size(600, 535);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -44,7 +45,7 @@ namespace AxisVM_plugin.UI
             {
                 Text = "Selection: " + selectionSummary,
                 Location = new Point(12, 12),
-                Size = new Size(396, 32)
+                Size = new Size(576, 36)
             };
 
             // Load combinations - all ticked by default
@@ -52,8 +53,9 @@ namespace AxisVM_plugin.UI
             lstCombos = new CheckedListBox
             {
                 Location = new Point(12, 72),
-                Size = new Size(396, 220),
+                Size = new Size(576, 220),
                 CheckOnClick = true,
+                HorizontalScrollbar = true,
                 IntegralHeight = false
             };
             for (int i = 0; i < comboNames.Count; i++) lstCombos.Items.Add(string.Format("{0}: {1}", i + 1, comboNames[i]), true);
@@ -65,13 +67,13 @@ namespace AxisVM_plugin.UI
 
             // Analysis type
             Label lblAnalysis = new Label { Text = "Results:", Location = new Point(12, 341), AutoSize = true };
-            cmbAnalysis = new ComboBox { Location = new Point(170, 338), Size = new Size(238, 21), DropDownStyle = ComboBoxStyle.DropDownList };
+            cmbAnalysis = new ComboBox { Location = new Point(170, 338), Size = new Size(408, 24), DropDownStyle = ComboBoxStyle.DropDownList };
             cmbAnalysis.Items.AddRange(new object[] { "Linear static", "Non-linear static" });
             cmbAnalysis.SelectedIndex = 0;
 
             // One coordinate system for both the output and the critical search
             Label lblAxes = new Label { Text = "Coordinate system:", Location = new Point(12, 373), AutoSize = true };
-            cmbAxes = new ComboBox { Location = new Point(170, 370), Size = new Size(238, 21), DropDownStyle = ComboBoxStyle.DropDownList };
+            cmbAxes = new ComboBox { Location = new Point(170, 370), Size = new Size(408, 24), DropDownStyle = ComboBoxStyle.DropDownList };
             cmbAxes.Items.AddRange(new object[] { "Local (N, Vy, Vz, Tx, My, Mz)", "Global (Fx, Fy, Fz, Mx, My, Mz)" });
             cmbAxes.SelectedIndex = 1;
 
@@ -81,7 +83,7 @@ namespace AxisVM_plugin.UI
                        "critical combinations are found: the largest (Max+) and the smallest (Min−) value,\n" +
                        "per member end and over all ends.",
                 Location = new Point(12, 410),
-                Size = new Size(396, 50),
+                Size = new Size(576, 64),
                 ForeColor = SystemColors.GrayText
             };
 
@@ -93,6 +95,7 @@ namespace AxisVM_plugin.UI
                 lblAxes, cmbAxes, lblNote, btnOk, btnCancel });
             AcceptButton = btnOk;
             CancelButton = btnCancel;
+            Theme.Apply(this, "Connection load extractor", "Choose combinations and axes. Search all six force and moment components.");
         }
 
         /// <summary>Ticks or clears every combination.</summary>

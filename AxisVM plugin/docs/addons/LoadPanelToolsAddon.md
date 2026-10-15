@@ -1,5 +1,7 @@
 # Load Panel Tools Addon
 
+[Illustrated user guide](../user-guide/panel-tools.md)
+
 ## Overview
 Four load panel operations that all work on **everything currently selected**, not one object at a time.
 The whole run — whichever operation — sits inside a single `BeginUpdate` / `EndUpdate` pair (`try/finally`,

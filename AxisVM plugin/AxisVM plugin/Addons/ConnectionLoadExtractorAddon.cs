@@ -52,35 +52,8 @@ namespace AxisVM_plugin.Addons
         public int Addon_IsItemVisible(object iAxisVMApp) { return 1; }
         public int Addon_IsModalWindow { get { return 0; } }
 
-        /// <summary>16x16 icon: a beam meeting a node, with a force arrow into the node.</summary>
-        public byte[] Addon_IconBitmap
-        {
-            get
-            {
-                using (var bmp = new Bitmap(16, 16))
-                {
-                    using (var g = Graphics.FromImage(bmp))
-                    {
-                        g.Clear(Color.Magenta); // transparent colour
-                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
-                        using (var beam = new Pen(Color.DimGray, 2))
-                            g.DrawLine(beam, 1, 11, 10, 11);           // the beam
-                        g.FillRectangle(Brushes.Blue, 10, 9, 4, 4);   // the node / connection
-                        using (var arrow = new Pen(Color.Red, 1))
-                        {
-                            g.DrawLine(arrow, 12, 1, 12, 7);           // force shaft
-                            g.DrawLine(arrow, 10, 5, 12, 7);           // arrow head
-                            g.DrawLine(arrow, 14, 5, 12, 7);
-                        }
-                    }
-                    using (var ms = new MemoryStream())
-                    {
-                        bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Bmp);
-                        return ms.ToArray();
-                    }
-                }
-            }
-        }
+        public byte[] Addon_IconBitmap { get { return AxisVM_plugin.Core.AddonIcons.ConnectionLoadExtractor(); } }
+
 
         public int Addon_IconBitmapTransparentColor { get { return ColorTranslator.ToWin32(Color.Magenta); } }
         public int Addon_ButtonPlaceFormId { get { return 0; } }

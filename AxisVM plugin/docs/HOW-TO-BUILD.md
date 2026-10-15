@@ -1,5 +1,7 @@
 # How to create, build and install an AxisVM add-on
 
+[Installation quick start](INSTALLATION.md) ? [Illustrated tool guides](user-guide/README.md)
+
 ## 1. How an add-on works
 
 An AxisVM add-on is a .NET Framework 4.8 **class library (DLL)** placed in `C:\AXISVM X8\AddOns`.
@@ -38,21 +40,22 @@ Required references (found in `C:\AXISVM X8`):
 
 Visual Studio: open `AxisVM plugin.slnx`, choose Debug, *Build Solution*.
 
-Command line (from the repo root):
+Command line (from the repository root):
 
 ```powershell
-& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe" `
-  "AxisVM plugin\ReactionTransferAddon.csproj" /p:Configuration=Debug /v:minimal /nologo
+dotnet build 'AxisVM plugin\AxisVM plugin.slnx' -c Release -m:1
+# Override the default C:\AXISVM X8 installation if needed:
+dotnet build 'AxisVM plugin\AxisVM plugin.slnx' -c Release -m:1 '/p:AxisVMDir=D:\AxisVM X8'
 ```
 
-(or `dotnet build` / Visual Studio's MSBuild if installed). Output: `AxisVM plugin\bin\Debug\<AssemblyName>.dll`.
+Output: `AxisVM plugin/AxisVM plugin/bin/Release/<AssemblyName>.dll`.
 
 ## 5. Install
 
 Close AxisVM, then copy the DLL:
 
 ```powershell
-Copy-Item "AxisVM plugin\bin\Debug\ReactionTransferAddon.dll" "C:\AXISVM X8\AddOns\" -Force
+.\scripts\Install-Addons.ps1
 ```
 
 (`C:\AXISVM X8\Plugins` is for plugins, not used for now.) Start AxisVM; the add-on is in the menu / toolbar.
@@ -61,8 +64,7 @@ Copy-Item "AxisVM plugin\bin\Debug\ReactionTransferAddon.dll" "C:\AXISVM X8\AddO
 
 - **Add-on not shown** – DLL not in `AddOns`, wrong target framework (must be 4.8), or the old DLL is locked
   because AxisVM is still open.
-- **Reference not found** – the `HintPath` in the `.csproj` is relative (`..\..\..\..\..\..\..\..\AXISVM X8\`).
-  If you move the repo to a different depth, change it to `C:\AXISVM X8\...`.
+- **Reference not found** - set `AxisVMDir` to the installed AxisVM folder. The default is set in `Directory.Build.props`; the repository depth does not matter.
 - **COM API questions** – see `docs/reference/axisvm_com_17100.pdf` (searchable text in `axisvm_com.txt`).
 
 ## 7. Rhino side (AxisBridge)

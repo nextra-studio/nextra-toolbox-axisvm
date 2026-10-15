@@ -1,5 +1,7 @@
 # One-Way Load Panel Addon
 
+[Illustrated user guide](../user-guide/one-way-panels.md)
+
 ## Overview
 Menu / toolbar entry **"N. One-Way Load Panel"** (`OneWayLoadPanelAddon.dll`). One command for both
 ways of making one-way load panels; what it does depends on the selection:

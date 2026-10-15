@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -40,10 +40,11 @@ namespace AxisVM_plugin.UI
 
         private void InitializeComponent()
         {
+            Theme.Initialize(this);
             this.Text = "End Pin Assign Settings";
             // ClientSize, not Size: Size includes the caption bar and border, so sizing by it left the
             // OK/Cancel row hanging below the bottom edge of the dialog.
-            this.ClientSize = new Size(360, 332);
+            this.ClientSize = new Size(470, 352);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
@@ -83,8 +84,8 @@ namespace AxisVM_plugin.UI
             cmbPinType.DropDownStyle = ComboBoxStyle.DropDownList;
             cmbPinType.Items.AddRange(new string[] { "Complete Pin", "Semi-rigid Pin" });
             cmbPinType.SelectedIndex = 1;
-            cmbPinType.Location = new Point(130, 97);
-            cmbPinType.Size = new Size(200, 21);
+            cmbPinType.Location = new Point(185, 97);
+            cmbPinType.Size = new Size(260, 24);
             cmbPinType.SelectedIndexChanged += CmbPinType_SelectedIndexChanged;
             this.Controls.Add(cmbPinType);
 
@@ -103,8 +104,8 @@ namespace AxisVM_plugin.UI
                 "Chain: End Node Only"
             });
             cmbPinTarget.SelectedIndex = 0;
-            cmbPinTarget.Location = new Point(130, 137);
-            cmbPinTarget.Size = new Size(200, 21);
+            cmbPinTarget.Location = new Point(185, 137);
+            cmbPinTarget.Size = new Size(260, 24);
             cmbPinTarget.SelectedIndexChanged += CmbPinTarget_SelectedIndexChanged;
             this.Controls.Add(cmbPinTarget);
 
@@ -117,7 +118,7 @@ namespace AxisVM_plugin.UI
 
             txtAngleTolerance = new TextBox();
             txtAngleTolerance.Text = "15.0";
-            txtAngleTolerance.Location = new Point(160, 177);
+            txtAngleTolerance.Location = new Point(205, 177);
             txtAngleTolerance.Size = new Size(120, 20);
             this.Controls.Add(txtAngleTolerance);
 
@@ -131,7 +132,7 @@ namespace AxisVM_plugin.UI
 
             txtStiffness = new TextBox();
             txtStiffness.Text = "1.0";
-            txtStiffness.Location = new Point(160, 217);
+            txtStiffness.Location = new Point(205, 217);
             txtStiffness.Size = new Size(120, 20);
             txtStiffness.Visible = false;
             this.Controls.Add(txtStiffness);
@@ -140,7 +141,7 @@ namespace AxisVM_plugin.UI
             Label lblDirectionNote = new Label();
             lblDirectionNote.Text = "Auto-orient re-aligns the local x of the selected beams/ribs along their chain. Unchecked, local axes are preserved; releases are still assigned.";
             lblDirectionNote.Location = new Point(20, 246);
-            lblDirectionNote.Size = new Size(320, 42);
+            lblDirectionNote.Size = new Size(425, 60);
             lblDirectionNote.ForeColor = SystemColors.GrayText;
             this.Controls.Add(lblDirectionNote);
 
@@ -168,6 +169,7 @@ namespace AxisVM_plugin.UI
             // "Semi-rigid Pin" is the default.
             CmbPinType_SelectedIndexChanged(cmbPinType, EventArgs.Empty);
             CmbPinTarget_SelectedIndexChanged(cmbPinTarget, EventArgs.Empty);
+            Theme.Apply(this, "End pin assign", "Choose rotational releases for the selected beam and rib chains.");
         }
 
         private void CmbPinType_SelectedIndexChanged(object sender, EventArgs e)

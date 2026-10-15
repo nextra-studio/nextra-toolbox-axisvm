@@ -75,8 +75,9 @@ namespace AxisVM_plugin.UI
 
         private void InitializeComponent()
         {
+            Theme.Initialize(this);
             Text = "Rhino Import";
-            ClientSize = new Size(600, 440);
+            ClientSize = new Size(600, 490);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -102,13 +103,13 @@ namespace AxisVM_plugin.UI
             lblFileInfo = new Label
             {
                 Location = new Point(16, 70),
-                Size = new Size(568, 42),
+                Size = new Size(568, 60),
                 ForeColor = SystemColors.GrayText,
                 Text = "Pick the file AxExport wrote in Rhino."
             };
 
             // ---- units ---------------------------------------------------
-            GroupBox grpUnits = new GroupBox { Text = "Units of the Rhino attributes", Location = new Point(16, 116), Size = new Size(568, 122) };
+            GroupBox grpUnits = new GroupBox { Text = "Units of the Rhino attributes", Location = new Point(16, 138), Size = new Size(568, 142) };
 
             Label lblLength = new Label { Text = "Length:", Location = new Point(16, 27), AutoSize = true };
             cboLength = new ComboBox { Location = new Point(76, 23), Size = new Size(80, 24), DropDownStyle = ComboBoxStyle.DropDownList };
@@ -123,7 +124,7 @@ namespace AxisVM_plugin.UI
             Label lblUnitNote = new Label
             {
                 Location = new Point(16, 56),
-                Size = new Size(540, 58),
+                Size = new Size(540, 80),
                 ForeColor = SystemColors.GrayText,
                 Text = "Length = the Rhino model unit (coordinates, thickness, eccentricity, load positions).\r\n" +
                        "Loads = the unit of load values and stiffnesses. The AxisBridge dialogs always write kN, kN/m, kN/m², kNm - " +
@@ -133,7 +134,7 @@ namespace AxisVM_plugin.UI
             grpUnits.Controls.AddRange(new Control[] { lblLength, cboLength, lblForce, cboForce, lblUnitNote });
 
             // ---- geometry ------------------------------------------------
-            GroupBox grpGeom = new GroupBox { Text = "Geometry", Location = new Point(16, 246), Size = new Size(568, 120) };
+            GroupBox grpGeom = new GroupBox { Text = "Geometry", Location = new Point(16, 290), Size = new Size(568, 142) };
 
             Label lblTol = new Label { Text = "Merge nodes closer than", Location = new Point(16, 27), AutoSize = true };
             txtTolerance = new TextBox { Location = new Point(175, 23), Size = new Size(65, 24), Text = "1.0" };
@@ -141,7 +142,7 @@ namespace AxisVM_plugin.UI
             Label lblTolNote = new Label
             {
                 Location = new Point(285, 22),
-                Size = new Size(270, 34),
+                Size = new Size(270, 44),
                 ForeColor = SystemColors.GrayText,
                 Text = "A beam end and a slab corner within this distance become one node."
             };
@@ -156,7 +157,7 @@ namespace AxisVM_plugin.UI
             Label lblIntersectNote = new Label
             {
                 Location = new Point(34, 84),
-                Size = new Size(520, 32),
+                Size = new Size(520, 48),
                 ForeColor = SystemColors.GrayText,
                 Text = "Each Rhino curve stays one member (releases at its ends, loads along its length). " +
                        "Springs, links and arcs are never split."
@@ -168,7 +169,7 @@ namespace AxisVM_plugin.UI
             chkDryRun = new CheckBox
             {
                 Text = "Dry run (check the attributes and report only - change nothing)",
-                Location = new Point(18, 380),
+                Location = new Point(18, 448),
                 AutoSize = true
             };
 
@@ -186,6 +187,7 @@ namespace AxisVM_plugin.UI
             CancelButton = btnCancel;
 
             UpdateOkState();
+            Theme.Apply(this, "Rhino import", "Import an AxisBridge JSON export. Check units and geometry settings first.");
         }
 
         private void Browse_Click(object sender, EventArgs e)

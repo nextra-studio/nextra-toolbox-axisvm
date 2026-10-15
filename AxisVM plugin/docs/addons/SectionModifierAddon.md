@@ -1,27 +1,22 @@
 # Section Modifier Addon
 
-## Overview
-The Section Modifier Addon provides a rapid way to batch-modify the cross-section properties of selected line members in the AxisVM model. It allows structural engineers to easily bump up or reduce section sizes during the iterative design process without navigating through multiple dialog boxes.
+[Illustrated user guide](../user-guide/section-modifier.md)
 
-## Workflow & Logic
+The existing engine modifies rectangular sections for selected beam, rib and truss lines, including lines belonging to selected members. The dialog exposes two optional dimensions in millimetres: width and depth.
 
-### 1. Selection & Identification
-- The user selects one or more line members in the model.
-- The script retrieves the `RLineData` for each selected member to identify its current Section ID and Material ID.
+## Existing engine behavior
 
-### 2. Section Modification Mapping
-- The UI presents a mapping table or dropdowns to the user, allowing them to define transformation rules (e.g., "Change all IPE 200 to IPE 240", or "Increase section depth by 50mm").
-- **Database Lookup**: If the modification involves standard steel profiles, the script interfaces with the AxisVM profile database to find the next larger or smaller section in a specific series (e.g., HEA, IPE).
-- **Parametric Modification**: If the section is a parametric concrete or timber shape (e.g., Rectangle), the script mathematically calculates the new dimensions (Width, Height).
+1. Collect selected line IDs and selected members' lines.
+2. Read beam/rib/truss material and section data.
+3. Read the current rectangular dimensions from a section name containing exactly two numeric parts separated by `x`, interpreted in millimetres. The fallback is 100 mm for each unparsed dimension.
+4. Replace the ticked dimensions with the dialog values; retain unticked dimensions using the rule above.
+5. Create or reuse a rectangular section named `WxD`. Assign it to the selected line, preserving the material and the data passed back to DefineAsBeam/DefineAsRib/DefineAsTruss. Beam/rib start and end receive the same new section.
+6. Redraw and report the number modified. Per-line read or definition failures can be skipped by the existing implementation.
 
-### 3. Application
-- The model enters an `Update` state to ensure bulk operations are fast and do not trigger constant graphical refreshes.
-- For each selected member:
-  - If a completely new section from the database is required, the script creates a new Section definition (if it doesn't already exist in the model) and updates the member's Section ID pointer.
-  - If it's a parametric shape, it modifies the parameters of the existing section definition or creates a new one.
-- The changes are committed to the model, and the graphical view is refreshed.
+There is no steel-profile mapping table, next-profile lookup, or generic section-shape editor. Restrict use to the intended rectangular naming convention and inspect the resulting assignments. This presentation update does not change that behavior.
 
-## File Structure
-- `Addons/SectionModifierAddon.cs`: AxisVM COM interface registration and Addon icon definition.
-- `UI/SectionModifierForm.cs`: The user interface for defining modification rules.
-- `Functions/SectionModifierFunction.cs`: The core logic that interacts with the profile database and modifies member data.
+## Sources
+
+- `Addons/SectionModifierAddon.cs`: registration and toolbar pictogram.
+- `UI/SectionModifierForm.cs`: dimension fields and validation.
+- `Functions/SectionModifierFunction.cs`: unchanged section engine.

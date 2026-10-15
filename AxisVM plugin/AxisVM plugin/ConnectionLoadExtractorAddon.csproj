@@ -32,10 +32,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="AxisVMDotNetAddonPluginInterface_v1.0.FW4">
-      <HintPath>..\..\..\..\..\..\..\..\AXISVM X8\AxisVMDotNetAddonPluginInterface_v1.0.FW4.dll</HintPath>
+      <HintPath>$(AxisVMDir)\AxisVMDotNetAddonPluginInterface_v1.0.FW4.dll</HintPath>
     </Reference>
     <Reference Include="Interop.AxisVM.FW4">
-      <HintPath>..\..\..\..\..\..\..\..\AXISVM X8\Interop.AxisVM.FW4.dll</HintPath>
+      <HintPath>$(AxisVMDir)\Interop.AxisVM.FW4.dll</HintPath>
       <EmbedInteropTypes>True</EmbedInteropTypes>
     </Reference>
     <Reference Include="System" />
@@ -59,6 +59,8 @@
     </Compile>
     <Compile Include="Functions\ConnectionLoadExtractorFunction.cs" />
     <Compile Include="Core\ConnectionLoadMath.cs" />
+    <Compile Include="Core\AddonIcons.cs" />
+    <Compile Include="UI\Theme.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

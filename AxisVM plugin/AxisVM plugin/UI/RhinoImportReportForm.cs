@@ -25,6 +25,7 @@ namespace AxisVM_plugin.UI
 
         private void InitializeComponent(string title, string headline, string body)
         {
+            Theme.Initialize(this);
             Text = title;
             ClientSize = new Size(660, 460);
             FormBorderStyle = FormBorderStyle.Sizable;
@@ -80,6 +81,7 @@ namespace AxisVM_plugin.UI
 
             AcceptButton = btnClose;
             CancelButton = btnClose;
+            Theme.ApplyResults(this, "Rhino import report", "Review the full report below. Copy it for your project notes.");
         }
     }
 }

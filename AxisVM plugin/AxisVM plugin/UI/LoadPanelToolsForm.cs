@@ -40,9 +40,10 @@ namespace AxisVM_plugin.UI
 
         private void InitializeComponent()
         {
+            Theme.Initialize(this);
             this.Text = "Load Panel Tools";
             // ClientSize rather than Size, so the button row sits where it is put.
-            this.ClientSize = new Size(420, 345);
+            this.ClientSize = new Size(580, 390);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
@@ -52,7 +53,7 @@ namespace AxisVM_plugin.UI
             {
                 Text = "Operation",
                 Location = new Point(15, 15),
-                Size = new Size(390, 135)
+                Size = new Size(550, 135)
             };
 
             radPanelToDomain = new RadioButton { Text = "Load Panel  →  Domain", Location = new Point(20, 25), AutoSize = true, Checked = true };
@@ -71,15 +72,15 @@ namespace AxisVM_plugin.UI
             lblWhatToSelect = new Label
             {
                 Location = new Point(18, 160),
-                Size = new Size(390, 34),
+                Size = new Size(540, 50),
                 ForeColor = SystemColors.GrayText
             };
             this.Controls.Add(lblWhatToSelect);
 
             lblDefaults = new Label
             {
-                Location = new Point(18, 200),
-                Size = new Size(390, 58),
+                Location = new Point(18, 218),
+                Size = new Size(540, 100),
                 ForeColor = SystemColors.GrayText
             };
             this.Controls.Add(lblDefaults);
@@ -87,7 +88,7 @@ namespace AxisVM_plugin.UI
             chkDeleteOriginal = new CheckBox
             {
                 Text = "Delete the original after converting",
-                Location = new Point(18, 265),
+                Location = new Point(18, 332),
                 AutoSize = true,
                 Checked = false
             };
@@ -104,6 +105,7 @@ namespace AxisVM_plugin.UI
             this.CancelButton = btnCancel;
 
             UpdateHints();
+            Theme.Apply(this, "Load panel tools", "Convert, split or merge the panels selected in AxisVM.");
         }
 
         private void Operation_CheckedChanged(object sender, EventArgs e)

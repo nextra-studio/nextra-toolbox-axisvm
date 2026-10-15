@@ -51,43 +51,8 @@ namespace AxisVM_plugin.Addons
         public int Addon_IsItemVisible(object iAxisVMApp) { return 1; }
         public int Addon_IsModalWindow { get { return 0; } }
 
-        public byte[] Addon_IconBitmap
-        {
-            get
-            {
-                using (var bmp = new Bitmap(16, 16))
-                {
-                    using (var g = Graphics.FromImage(bmp))
-                    {
-                        g.Clear(Color.Magenta); // Transparent color
-                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
-                        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.None;
+        public byte[] Addon_IconBitmap { get { return AxisVM_plugin.Core.AddonIcons.RhinoImport(); } }
 
-                        // A wireframe box on the left with an arrow pointing into a frame on the right -
-                        // geometry coming across from another program.
-                        using (var pen = new Pen(Color.DimGray, 1))
-                        {
-                            g.DrawRectangle(pen, 1, 3, 4, 9);
-                        }
-                        using (var arrow = new Pen(Color.SeaGreen, 2))
-                        {
-                            g.DrawLine(arrow, 6, 8, 10, 8);
-                            g.DrawLine(arrow, 8, 6, 10, 8);
-                            g.DrawLine(arrow, 8, 10, 10, 8);
-                        }
-                        using (var target = new Pen(Color.Navy, 1))
-                        {
-                            g.DrawRectangle(target, 11, 3, 3, 9);
-                        }
-                    }
-                    using (var ms = new MemoryStream())
-                    {
-                        bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Bmp);
-                        return ms.ToArray();
-                    }
-                }
-            }
-        }
 
         public int Addon_IconBitmapTransparentColor { get { return ColorTranslator.ToWin32(Color.Magenta); } }
         public int Addon_ButtonPlaceFormId { get { return 0; } }

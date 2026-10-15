@@ -51,6 +51,7 @@ namespace AxisVM_plugin.UI
 
         private void InitializeComponent()
         {
+            Theme.Initialize(this);
             Text = "Connection Loads - " + result.Axes + " axes";
             ClientSize = new Size(1150, 560);
             StartPosition = FormStartPosition.CenterParent;
@@ -124,6 +125,7 @@ namespace AxisVM_plugin.UI
             KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) Close(); };
 
             Controls.AddRange(new Control[] { tabs, btnExportAll, btnExportCrit, btnCopy, btnSelect, lblHint, btnClose });
+            Theme.ApplyResults(this, "Connection loads", "Summary, six critical components and all results. Export CSV or select rows in the model.");
         }
 
         /// <summary>Adds a tab with a critical table for the given rows.</summary>
