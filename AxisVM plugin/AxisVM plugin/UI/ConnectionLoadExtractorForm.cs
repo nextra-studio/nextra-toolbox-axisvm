@@ -7,8 +7,8 @@ using AxisVM_plugin.Core;
 namespace AxisVM_plugin.UI
 {
     /// <summary>
-    /// Input dialog of the Connection Load Extractor: which load combinations, which analysis, the output
-    /// coordinate system and the direction the critical combination is searched in. Members and nodes come
+    /// Input dialog of the Connection Load Extractor: which load combinations, which analysis and the
+    /// coordinate system (local or global). The critical search covers all six components. Members and nodes come
     /// from the AxisVM selection and are only summarised here.
     /// </summary>
     public class ConnectionLoadExtractorForm : Form
@@ -17,18 +17,12 @@ namespace AxisVM_plugin.UI
         public List<int> SelectedComboIds { get; private set; }
         /// <summary>True = non-linear static results, false = linear static.</summary>
         public bool NonLinear { get; private set; }
-        /// <summary>Axes the exported loads are written in.</summary>
-        public LoadSystem OutputSystem { get; private set; }
-        /// <summary>Axes the critical direction is defined in.</summary>
-        public LoadSystem CriticalSystem { get; private set; }
-        /// <summary>Critical component index 0..5 (forces 0..2, moments 3..5).</summary>
-        public int CriticalComponent { get; private set; }
+        /// <summary>Axes the loads are reported in and the critical combinations are searched in.</summary>
+        public LoadSystem Axes { get; private set; }
 
         private CheckedListBox lstCombos;
         private ComboBox cmbAnalysis;
-        private ComboBox cmbOutput;
-        private ComboBox cmbCritSystem;
-        private ComboBox cmbCritComponent;
+        private ComboBox cmbAxes;
 
         public ConnectionLoadExtractorForm(string selectionSummary, IList<string> comboNames)
         {
@@ -75,27 +69,19 @@ namespace AxisVM_plugin.UI
             cmbAnalysis.Items.AddRange(new object[] { "Linear static", "Non-linear static" });
             cmbAnalysis.SelectedIndex = 0;
 
-            // Output coordinate system
-            Label lblOutput = new Label { Text = "Output loads in:", Location = new Point(12, 373), AutoSize = true };
-            cmbOutput = new ComboBox { Location = new Point(170, 370), Size = new Size(238, 21), DropDownStyle = ComboBoxStyle.DropDownList };
-            cmbOutput.Items.AddRange(new object[] { "Local (N, Vy, Vz, Tx, My, Mz)", "Global (Fx, Fy, Fz, Mx, My, Mz)" });
-            cmbOutput.SelectedIndex = 1;
-
-            // Critical direction = system + component
-            Label lblCrit = new Label { Text = "Critical direction:", Location = new Point(12, 405), AutoSize = true };
-            cmbCritSystem = new ComboBox { Location = new Point(170, 402), Size = new Size(100, 21), DropDownStyle = ComboBoxStyle.DropDownList };
-            cmbCritSystem.Items.AddRange(new object[] { "Local", "Global" });
-            cmbCritComponent = new ComboBox { Location = new Point(278, 402), Size = new Size(130, 21), DropDownStyle = ComboBoxStyle.DropDownList };
-            cmbCritSystem.SelectedIndexChanged += delegate { FillComponents(); };
-            cmbCritSystem.SelectedIndex = 1;  // fills the component list
-            cmbCritComponent.SelectedIndex = 1; // Global Fy - the example from the brief
+            // One coordinate system for both the output and the critical search
+            Label lblAxes = new Label { Text = "Coordinate system:", Location = new Point(12, 373), AutoSize = true };
+            cmbAxes = new ComboBox { Location = new Point(170, 370), Size = new Size(238, 21), DropDownStyle = ComboBoxStyle.DropDownList };
+            cmbAxes.Items.AddRange(new object[] { "Local (N, Vy, Vz, Tx, My, Mz)", "Global (Fx, Fy, Fz, Mx, My, Mz)" });
+            cmbAxes.SelectedIndex = 1;
 
             Label lblNote = new Label
             {
-                Text = "Loads are the force each member exerts on the node. Critical = the combination with\n" +
-                       "the largest (Max+) and the smallest (Min−) value, per member end and overall.",
-                Location = new Point(12, 436),
-                Size = new Size(396, 34),
+                Text = "Loads are the force each member exerts on the node. For each of the six components the\n" +
+                       "critical combinations are found: the largest (Max+) and the smallest (Min−) value,\n" +
+                       "per member end and over all ends.",
+                Location = new Point(12, 410),
+                Size = new Size(396, 50),
                 ForeColor = SystemColors.GrayText
             };
 
@@ -104,7 +90,7 @@ namespace AxisVM_plugin.UI
             Button btnCancel = new Button { Text = "Cancel", Location = new Point(328, 482), Size = new Size(80, 27), DialogResult = DialogResult.Cancel };
 
             Controls.AddRange(new Control[] { lblSel, lblCombos, lstCombos, btnAll, btnNone, lblAnalysis, cmbAnalysis,
-                lblOutput, cmbOutput, lblCrit, cmbCritSystem, cmbCritComponent, lblNote, btnOk, btnCancel });
+                lblAxes, cmbAxes, lblNote, btnOk, btnCancel });
             AcceptButton = btnOk;
             CancelButton = btnCancel;
         }
@@ -113,17 +99,6 @@ namespace AxisVM_plugin.UI
         private void SetAllCombos(bool value)
         {
             for (int i = 0; i < lstCombos.Items.Count; i++) lstCombos.SetItemChecked(i, value);
-        }
-
-        /// <summary>Refills the component list with the names of the chosen system, keeping the index.</summary>
-        private void FillComponents()
-        {
-            int keep = Math.Max(0, cmbCritComponent.SelectedIndex);
-            LoadSystem s = cmbCritSystem.SelectedIndex == 0 ? LoadSystem.Local : LoadSystem.Global;
-            string[] names = ConnectionLoadMath.Names(s);
-            cmbCritComponent.Items.Clear();
-            for (int i = 0; i < 6; i++) cmbCritComponent.Items.Add(names[i] + " [" + ConnectionLoadMath.Unit(i) + "]");
-            cmbCritComponent.SelectedIndex = keep;
         }
 
         /// <summary>Validates and copies the choices into the public properties.</summary>
@@ -137,9 +112,7 @@ namespace AxisVM_plugin.UI
                 return;
             }
             NonLinear = cmbAnalysis.SelectedIndex == 1;
-            OutputSystem = cmbOutput.SelectedIndex == 0 ? LoadSystem.Local : LoadSystem.Global;
-            CriticalSystem = cmbCritSystem.SelectedIndex == 0 ? LoadSystem.Local : LoadSystem.Global;
-            CriticalComponent = cmbCritComponent.SelectedIndex;
+            Axes = cmbAxes.SelectedIndex == 0 ? LoadSystem.Local : LoadSystem.Global;
             DialogResult = DialogResult.OK;
             Close();
         }

@@ -13,7 +13,7 @@ using AxisVM_plugin.UI;
  *
  * Reads the end forces of the selected beams / ribs at the selected nodes for the chosen load
  * combinations, expresses them as the force each member exerts on the node (local or global axes),
- * and finds the governing combination (Max+ and Min-) for one chosen direction.
+ * and finds the governing combination (Max+ and Min-) for each of the six components in those axes.
  *
  * WORKFLOW:
  * 1. GATHER - selected lines + the lines of selected members; only ltBeam / ltRib are kept. Selected
@@ -25,8 +25,8 @@ using AxisVM_plugin.UI;
  * 3. FORCES - IAxisVMForces.GetLineForcesByLoadCombinationId per line and combination. The section with
  *    the smallest PosX is the start node, the largest PosX the end node.
  * 4. SIGN + TRANSFORM - ConnectionLoadMath.RawToNodeLocal (start +S, end -S) then LocalToGlobal.
- * 5. CRITICAL - per member end, the combination with the largest and with the smallest value of the
- *    chosen component, plus the same over all reported ends.
+ * 5. CRITICAL - for each of the six components: per member end, the combination with the largest and
+ *    with the smallest value, plus the same over all reported ends.
  * 6. CHECKS - frame orthonormality / parallelism, PosX vs length, joint equilibrium at nodes where every
  *    connected line is reported, and a cross-check against AxisVM's own node reader
  *    (GetLineForcesByLoadCombinationIdConnectedToNode).
@@ -64,10 +64,11 @@ namespace AxisVM_plugin.Functions
         public double[] In(LoadSystem system) { return system == LoadSystem.Local ? NodeLocal : Global; }
     }
 
-    /// <summary>A Max+ or Min- result, either for one member end or (End == null) over all ends.</summary>
+    /// <summary>A Max+ or Min- result of one component, either for one member end or (End == null) over all ends.</summary>
     public class CriticalRow
     {
         public MemberEnd End;       // null = governing over every reported end
+        public int Component;       // 0..5 in the result's axes (forces 0..2, moments 3..5)
         public CriticalKind Kind;
         public EndLoadRow Row;      // the combination that governs, with its full concurrent vector
         public bool SignMatches;    // false when "Max+" is not positive or "Min-" is not negative
@@ -76,19 +77,11 @@ namespace AxisVM_plugin.Functions
     /// <summary>Everything the result window shows.</summary>
     public class ExtractionResult
     {
-        public LoadSystem OutputSystem;
-        public LoadSystem CriticalSystem;
-        public int CriticalComponent;                         // 0..5
+        public LoadSystem Axes;                               // output AND critical search axes
         public List<EndLoadRow> All = new List<EndLoadRow>();
-        public List<CriticalRow> Critical = new List<CriticalRow>();
+        public List<CriticalRow> Critical = new List<CriticalRow>(); // all six components
         public List<string> Checks = new List<string>();
         public List<int> TargetNodeIds = new List<int>();
-
-        /// <summary>e.g. "Global Fy".</summary>
-        public string CriticalLabel
-        {
-            get { return CriticalSystem + " " + ConnectionLoadMath.Names(CriticalSystem)[CriticalComponent]; }
-        }
     }
 
     public class ConnectionLoadExtractorFunction
@@ -203,9 +196,7 @@ namespace AxisVM_plugin.Functions
 
                     ExtractionResult result = new ExtractionResult
                     {
-                        OutputSystem = form.OutputSystem,
-                        CriticalSystem = form.CriticalSystem,
-                        CriticalComponent = form.CriticalComponent,
+                        Axes = form.Axes,
                         TargetNodeIds = ends.Select(e => e.NodeId).Distinct().OrderBy(n => n).ToList()
                     };
                     result.Checks.AddRange(checks);
@@ -519,28 +510,32 @@ namespace AxisVM_plugin.Functions
         // Critical
         // ------------------------------------------------------------------
 
-        /// <summary>Max+ and Min- of the chosen component, per member end and over all ends.</summary>
+        /// <summary>
+        /// Max+ and Min- of every one of the six components (in the result's axes), per member end and over
+        /// all ends. Order: component, then member ends, then the "All ends" pair.
+        /// </summary>
         private static void FindCriticalRows(List<MemberEnd> ends, ExtractionResult result)
         {
-            int c = result.CriticalComponent;
-            LoadSystem s = result.CriticalSystem;
-
-            foreach (MemberEnd e in ends)
+            LoadSystem s = result.Axes;
+            for (int c = 0; c < 6; c++)
             {
-                List<EndLoadRow> rows = result.All.Where(r => r.End == e).ToList();
-                AddCritical(result, e, rows, rows.Select(r => r.In(s)[c]).ToList());
+                foreach (MemberEnd e in ends)
+                {
+                    List<EndLoadRow> rows = result.All.Where(r => r.End == e).ToList();
+                    AddCritical(result, e, c, rows, rows.Select(r => r.In(s)[c]).ToList());
+                }
+                // Governing over every reported end (End = null)
+                AddCritical(result, null, c, result.All, result.All.Select(r => r.In(s)[c]).ToList());
             }
-            // Governing over every reported end (End = null)
-            AddCritical(result, null, result.All, result.All.Select(r => r.In(s)[c]).ToList());
         }
 
-        /// <summary>Appends the Max+ and Min- rows for one set of rows.</summary>
-        private static void AddCritical(ExtractionResult result, MemberEnd end, List<EndLoadRow> rows, List<double> values)
+        /// <summary>Appends the Max+ and Min- rows of one component for one set of rows.</summary>
+        private static void AddCritical(ExtractionResult result, MemberEnd end, int component, List<EndLoadRow> rows, List<double> values)
         {
             CriticalPick pick = ConnectionLoadMath.FindCritical(values);
             if (pick.MaxIndex < 0) return; // no rows at all for this end
-            result.Critical.Add(new CriticalRow { End = end, Kind = CriticalKind.MaxPositive, Row = rows[pick.MaxIndex], SignMatches = pick.HasPositive });
-            result.Critical.Add(new CriticalRow { End = end, Kind = CriticalKind.MinNegative, Row = rows[pick.MinIndex], SignMatches = pick.HasNegative });
+            result.Critical.Add(new CriticalRow { End = end, Component = component, Kind = CriticalKind.MaxPositive, Row = rows[pick.MaxIndex], SignMatches = pick.HasPositive });
+            result.Critical.Add(new CriticalRow { End = end, Component = component, Kind = CriticalKind.MinNegative, Row = rows[pick.MinIndex], SignMatches = pick.HasNegative });
         }
 
         // ------------------------------------------------------------------

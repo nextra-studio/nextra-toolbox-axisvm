@@ -3,8 +3,8 @@
 ## Overview
 The Connection Load Extractor reads the end forces of selected beams and ribs at selected nodes, for selected load
 combinations, and reports them as the **force each member exerts on the node**. The loads are given in the member's
-local axes (N, Vy, Vz, Tx, My, Mz) or in global axes (Fx, Fy, Fz, Mx, My, Mz). For one chosen direction (for example
-Global Fy), it also finds the **critical** load combination: the most positive (Max +) and the most negative (Min −)
+local axes (N, Vy, Vz, Tx, My, Mz) or in global axes (Fx, Fy, Fz, Mx, My, Mz). For **each of the six components** in
+those axes it also finds the **critical** load combinations: the most positive (Max +) and the most negative (Min −)
 value, per member end and over all reported ends. Both the full table and the critical table can be exported for
 connection design.
 
@@ -24,9 +24,8 @@ selection, and only when you press "Select in model".
 
 ### 2. Dialog
 - Load combinations (checklist, all ticked by default), and Linear or Non-linear static results.
-- **Output loads in**: Local or Global.
-- **Critical direction**: a system (Local or Global) plus a component. The system can differ from the output system.
-  For example, output can be in Local while the critical combination is searched for Global Fy.
+- **Coordinate system**: Local or Global. It is used both for the output and for the critical search; no component
+  is chosen, because all six are searched.
 
 ### 3. Local axes (ResolveFrames)
 - Lines have no transformation matrix of their own, so the axes come from `IAxisVMMember.GetTrMatrix` of the member
@@ -60,7 +59,7 @@ Forces and moments are both true vectors, so each triple is rotated with the sam
 `F_global = N·ex + Vy·ey + Vz·ez`, `M_global = Tx·ex + My·ey + Mz·ez`.
 
 ### 7. Critical (FindCriticalRows)
-- For each member end, the chosen component is evaluated in the chosen critical system for every combination:
+- For each of the six components (in the chosen axes) and each member end, every combination is evaluated:
   **Max +** is the combination with the largest value and **Min −** the one with the smallest.
 - The same search is then run over all reported ends ("All ends").
 - Each critical row carries the **full concurrent vector** of that combination, not just the critical component.
@@ -68,9 +67,12 @@ Forces and moments are both true vectors, so each triple is rotated with the sam
   "no positive / negative value". On a tie, the first combination in model order wins.
 
 ### 8. Result window
-- **Critical** tab: Max + / Min − per member end, plus the "All ends" rows (bold, orange).
-- **All** tab: every member end × combination. Rows that are critical for their end are light yellow; the overall
-  governing rows are orange.
+- **Summary** tab: Max + / Min − over all reported ends for each of the six components (12 rows), with node, line,
+  end, combination name, the critical value and the full concurrent vector (the governing component in bold).
+- **One tab per component** (Fx … Mz, or N … Mz): Max + / Min − per member end, plus the "All ends" rows (orange).
+- **All** tab: every member end × combination. Rows that are critical (any component) for their end are light yellow;
+  the overall governing rows are orange.
+- **Export critical (CSV)** writes the critical rows of all six components, with a Component column.
 - **Checks** tab: all checks below. The tab title shows the number of ⚠.
 - **Export all (CSV)** / **Export critical (CSV)**: `;`-separated, `.` decimal, 3 decimals, a `sep=;` first line and
   a UTF-8 BOM, so Excel opens the file correctly in a Dutch locale.
@@ -135,6 +137,6 @@ Checks\bin\Debug\ConnectionLoadMathChecks.exe      (exit code 0 = all passed)
   AxisVM by hand to compare.
 - The results window is modeless (owned by the AxisVM main form), so AxisVM stays usable while it is open. "Select in
   model" first clears the node, line and member selection, then selects only the chosen items. A new run closes the
-  previous result window.
+  previous result window. Close / Esc call `Close()` directly, because a button's `DialogResult` only closes modal forms.
 - The toolbar button is on the **Static** tab (`Addon_ButtonPlaceToolbarId` = 4; 0 geometry, 1 elements, 2 loads,
   3 mesh, 4 static).
