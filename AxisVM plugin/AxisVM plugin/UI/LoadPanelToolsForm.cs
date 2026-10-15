@@ -113,16 +113,16 @@ namespace AxisVM_plugin.UI
             {
                 lblWhatToSelect.Text = "Select the load panels to convert. Every selected panel is handled in one pass.";
                 lblDefaults.Text = "New domains are created with placeholder attributes:\n" + domainDefaults +
-                                   "\nAdjust them in AxisVM afterwards.";
+                                   "\nAdjust them in AxisVM afterwards. When the panel is deleted, its area\nloads move onto the domain.";
                 chkDeleteOriginal.Text = "Delete the load panel once its domain exists";
                 chkDeleteOriginal.Enabled = true;
             }
             else if (radDomainToPanel.Checked)
             {
                 lblWhatToSelect.Text = "Select the domains to convert. Every selected domain is handled in one pass.";
-                lblDefaults.Text = "A panel created from a domain keeps an associated contour, so deleting the\n" +
-                                   "domain can take the new panel with it. The summary reports how many\n" +
-                                   "survived.";
+                lblDefaults.Text = "The new panel follows the domain's contour lines and stays when the domain\n" +
+                                   "is deleted. Loads on a deleted domain are removed with it - the summary\n" +
+                                   "says how many.";
                 chkDeleteOriginal.Text = "Delete the domain once its load panel exists";
                 chkDeleteOriginal.Enabled = true;
             }
@@ -130,8 +130,8 @@ namespace AxisVM_plugin.UI
             {
                 lblWhatToSelect.Text = "Select the load panels AND the lines that cut them. Each cutting line must run\nbetween two points on the panel's contour.";
                 lblDefaults.Text = "Each panel is replaced by the pieces the lines cut it into. The pieces inherit the\n" +
-                                   "original's Auto flag and its load-carrying edges; a cutting line that is a beam or\n" +
-                                   "rib also carries load.";
+                                   "original's Auto flag, load-carrying edges and area loads; a cutting line that is a\n" +
+                                   "beam or rib also carries load.";
                 chkDeleteOriginal.Text = "Delete the original (always on when splitting)";
                 chkDeleteOriginal.Enabled = false;
             }

@@ -15,89 +15,108 @@ A checkbox decides whether the source object is deleted once its counterpart exi
 replaces the original — the checkbox is disabled and forced on for that mode.
 
 ## The UID discipline
-This is the thing to keep in mind when editing this file. Three AxisVM operations renumber collections:
+This is the thing to keep in mind when editing the operations. Three AxisVM operations renumber collections:
 
-- deleting a load panel renumbers **load panels**
-- `IAxisVMLine.SplitByNode` renumbers **lines**
+- deleting a load panel renumbers **load panels**; deleting a domain renumbers **domains**
+- `IAxisVMLine.SplitByNode` renumbers **lines**, and both halves get **new UIDs** (the original UID is gone).
+  It returns the halves' indices *after* renumbering.
 - node ids are safe — splitting only *adds* nodes
 
 So every id that has to survive one of those is held as a **UID** and re-resolved through
-`get_IndexOfUID` immediately before use. In particular, `TrySplitPanel` re-resolves the cutting line's
-index *after* `EnsureContourCorner`, because that call may have split a contour edge underneath it.
+`get_IndexOfUID` immediately before use.
 
 ## 1. Load Panel → Domain
 - The selection is read with a `get_Selected(i)` loop over `1..Count` — `IAxisVMLoadPanels` has no
   `GetSelectedItemIds`.
 - Per panel: `GetContourLineIDs` → `Domains.Add(contourLines, ref attr)`.
-- Panels whose contour is `lpctUserDefined` (a free polygon with no lines behind it) make
-  `GetContourLineIDs` fail, and are reported and skipped — there is nothing to hand to `Domains.Add`.
+- Panels whose contour is `lpctUserDefined` (a free polygon with no lines behind it) have no contour lines,
+  and are reported and skipped.
 - **Placeholder attributes**, because a load panel carries no thickness or material of its own:
   200 mm, `stShell`, and the first **concrete** material in the model (falling back to the first material
-  of any type). The dialog states exactly what will be used; adjust the domains in AxisVM afterwards.
-  If the model has no material at all, nothing is created and the summary says so.
-- Creating domains does not renumber load panels, so the loop runs on stable indices; the deletions all
-  happen afterwards in one `DeleteSelected`.
+  of any type). If the model has no material at all, nothing is created and the summary says so.
+- `Domains.Add` turns beams on the contour into ribs — that is AxisVM's own behaviour.
+- With **delete the original**, the panel's uniform/linear area loads are moved onto the new domain
+  (`AddDomainLinear`, same plane points and values). Other panel load kinds are counted and reported.
 
 ## 2. Domain → Load Panel
 - `Domains.GetSelectedItemIds` → `LoadPanels.AddFromDomain(domainId)` per domain. Adding panels does not
   renumber domains, so the indices hold for the whole loop.
-- **Deleting the source domain is riskier than it looks**: a panel made by `AddFromDomain` has an
-  *associated* contour (`lpctAssociated`), so removing the domain can remove the panel with it. Rather than
-  guess, the code records the new panels' UIDs, deletes the domains, then counts how many of those UIDs
-  still resolve, and reports the difference. The dialog warns about this before the run.
+- `AddFromDomain` hands back the **existing** panel when one already covers the domain. That is recognised
+  (the returned UID was already present), reported, and the domain is not deleted.
+- With **delete the original**, the converted domains are removed with `Domains.Delete`, highest index
+  first. `IAxisVMDomains` has no `SelectAll`. The new panel follows the contour lines and **survives** the
+  domain deletion (verified live). Loads on the deleted domains go with them; their count is reported.
 
 ## 3. Split Load Panel by lines
 
 ### Contour ring
-`BuildContourRing` walks `GetContourLineIDs` into an ordered ring where `ringLines[i]` runs from
-`ringNodes[i]` to `ringNodes[i+1]` and the last edge closes back onto `ringNodes[0]`. The walk is done by
-chaining shared end nodes rather than trusting the returned order, and it fails cleanly if the contour is
-not a single closed loop.
+`BuildRing` walks `GetContourLineIDs` into an ordered ring where `Lines[i]` runs from `Nodes[i]` to
+`Nodes[i+1]` and the last edge closes back onto `Nodes[0]`. The walk chains shared end nodes rather than
+trusting the returned order, and fails cleanly if the contour is not a single closed loop.
 
-### Placing the cut
-For a line to cut a panel, both of its end nodes must be **corners of the contour ring**.
-`EnsureContourCorner` handles the common case where an end sits part-way along an edge: it finds the edge
-the node lies on (perpendicular distance ≤ 0.1 mm, strictly between the ends), splits it there with
-`SplitByNode`, and rebuilds the ring.
-
-A cut is rejected — with a reason in the summary — when:
+### Validating the cut — before anything is changed
+Each end of the cutting line is located on the ring: on a corner, or strictly part-way along an edge
+(within 1 mm). The cut is rejected, with a reason in the summary, when:
 - the line is itself one of the contour edges,
-- an end does not lie on the contour at all,
-- both ends land on the same corner,
-- the two corners are neighbours (the line runs alongside an edge and encloses no area).
+- an end does not lie on the contour,
+- the two ends share an edge or are neighbouring/identical corners (the line runs along the contour),
+- the line's midpoint is outside the panel (point-in-polygon in the contour's own plane, which guards concave
+  panels).
+
+Only after it passes are the edges split (`SplitByNode`), so a rejected line leaves the model untouched.
 
 ### Building the pieces
 The ring is walked forward from corner A to corner B for one piece and from B back to A for the other; the
 cutting line closes both. Each piece is created with `AddFromLineIDs` and inherits:
 - the original's `Auto` flag (when `Auto` is true, AxisVM works the edges out itself and nothing more is set),
-- the original's **load-carrying edges** (`GetLines`), matched by UID so a contour edge that got split still
-  counts — `uidAncestor` maps each half back to the edge it came from,
-- plus the **cutting line itself** if it is an `ltBeam` or `ltRib`, on the reasoning that a real member
-  splitting a panel should pick up load. A plain geometry line does not.
+- the original's **load-carrying edges** (`GetLines`), matched by UID through an ancestry map so the halves
+  of a split loaded edge still count,
+- plus the **cutting line itself** if it is an `ltBeam` or `ltRib` — a real member splitting a panel picks up
+  load. A plain geometry line does not.
 
-Both `SetLines` and the per-edge `SelectedEdge` flags are written, the same pairing the One-Way Load Panel
-addon uses.
+Only `SetLines` drives AxisVM's load distribution. The per-edge `SelectedEdge` flags do not (verified by
+analysis: contradicting flags give identical beam forces), and `SetLines` clears them, so they are not set.
+
+### Loads
+Deleting a panel deletes its loads. Before the first cut, the panel's uniform/linear area loads are read and
+then re-added to every final piece with `AddLoadPanelLinear`. There is no typed getter for panel loads:
+`GetLoad` returns the record bytes, and a 120-byte record whose case and panel fields match the load's own
+is decoded as `RLoadPanelLinear` (5 × int32, 4 bytes padding, 12 doubles). Panel loads report `LoadType -1`
+with the panel index as `ElementId`. Other panel load kinds are counted and reported, not guessed at.
 
 ### Several lines through one panel
-A worklist drives it: cut a panel, push its two pieces, then try the remaining lines against those. A panel
-crossed by two lines therefore ends up as three or four pieces. Each cutting line is consumed once per
-original panel. A piece nothing cuts any further is a final result.
+A worklist drives it: cut a panel, queue its two pieces, then try the remaining lines against those. A panel
+crossed by two lines ends up as three or four pieces. Each cutting line is consumed once per original panel.
 
 ## File Structure
 - `Addons/LoadPanelToolsAddon.cs` — COM interface registration, toolbar icon, menu visibility.
 - `UI/LoadPanelToolsForm.cs` — operation radio group, per-operation hints, delete-original checkbox.
-- `Functions/LoadPanelToolsLogic.cs` — all three operations.
-- `LoadPanelToolsAddon.csproj` — compiles only its own three sources plus `Properties/AssemblyInfo.cs`.
+- `Functions/LoadPanelToolsLogic.cs` — entry point: selection, dialog, `BeginUpdate` batch, summary.
+- `Functions/LoadPanelOps.cs` — the three operations, UI-free.
+- `LoadPanelToolsAddon.csproj` — compiles only its own sources plus `Properties/AssemblyInfo.cs`.
+
+## Live checks
+`Checks/LoadPanelToolsLiveChecks` runs `LoadPanelOps.cs` against a real AxisVM: 10 cases (split by one line,
+two lines, a diagonal, three rejections; panel → domain keep/delete with load transfer; domain → panel keep,
+duplicate, delete). It builds its geometry at x ≥ 100 m and deletes everything it made.
+
+It only runs against a **scratch** instance: start a separate AxisVM, save its empty model as
+`LoadPanelTest*.axs` (with at least one material), and pass its process id:
+
+```
+MSBuild Checks\LoadPanelToolsLiveChecks.csproj /p:Configuration=Debug
+set LP_PID=<pid of the scratch AxisVM>
+Checks\bin\Debug\LoadPanelToolsLiveChecks.exe      (exit code 0 = all passed)
+```
+
+The harness attaches through the NextraAxisVM add-on's `!NextraAxisVM.Host.<pid>` entry in the Running Object
+Table (AxisVM itself is not registered there), and refuses to run if the open file is not a
+`LoadPanelTest*.axs` scratch file.
 
 ## Notes / limitations
 - **No intersection maths.** A cutting line's ends must be *existing nodes* on the contour. A line that
-  merely crosses the contour with no node there is skipped rather than intersected — no new nodes are
-  invented.
-- **A rejected cut can still leave a split edge behind.** `EnsureContourCorner` has to split a contour edge
-  before the ring positions (and therefore the adjacency test) are knowable, so a line that turns out not to
-  cut the panel may leave that edge divided. The division is geometrically harmless — the node was already
-  there — but it is a model change.
-- **Concave contours are not tested for containment.** A chord between two non-adjacent corners of a concave
-  contour can fall outside the panel; the code relies on `AddFromLineIDs` rejecting the result.
+  merely crosses the contour with no node there is skipped rather than intersected.
+- Two cutting lines that cross each other inside a panel are not intersected either: the second one is tried
+  against the pieces of the first and skipped when neither piece holds both its ends.
 - Interop signature gotcha: `GetContourLineIDs` is `ref`, `GetLines` is `out`. They are inconsistent in the
   interop assembly, so check before adding calls.
