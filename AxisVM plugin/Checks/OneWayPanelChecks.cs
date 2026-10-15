@@ -129,6 +129,69 @@ internal static class OneWayPanelChecks
             m = Rectangle(false);
             m.Nodes.Data[2] = new RNode { x = 4, y = 0, z = 1 };
             Check(Generate(m, false, new List<string>()).Count == 0, "sloped boundary rejected instead of assigning XY load path");
+            // Auto follows the panel's own edges: shorter span vs. the same turned 90 deg.
+            m = Rectangle(false); // 4 wide (X) x 8 long (Y): lines 1,3 along X, 2,4 along Y
+            OneWayPanelBuilder.GeneratePanels(m, Boundary(m), new OneWayPanelOptions { NoSpacing = true, SpanningDirection = 0, AngleToleranceDeg = 15 }, 1, new List<string>());
+            Check(m.LoadPanels.Item[1].Receiving.SetEquals(new int[] { 2, 4 }), "Auto shorter: spans the 4 m way onto the long sides");
+            m = Rectangle(false);
+            OneWayPanelBuilder.GeneratePanels(m, Boundary(m), new OneWayPanelOptions { NoSpacing = true, SpanningDirection = 3, AngleToleranceDeg = 15 }, 1, new List<string>());
+            Check(m.LoadPanels.Item[1].Receiving.SetEquals(new int[] { 1, 3 }), "Auto longer: spans the 8 m way onto the short sides");
+            m = new IAxisVMModel(); // the same bay rotated 30 deg: Auto must still pick the bay's short span
+            double c30 = Math.Cos(Math.PI / 6), s30 = Math.Sin(Math.PI / 6);
+            Func<double, double, int> rn = (u, v) => m.Nodes.Add(u * c30 - v * s30, u * s30 + v * c30, 0);
+            int r1 = rn(0, 0), r2 = rn(4, 0), r3 = rn(4, 8), r4 = rn(0, 8);
+            m.Lines.AddLine(r1, r2); m.Lines.AddLine(r2, r3); m.Lines.AddLine(r3, r4); m.Lines.AddLine(r4, r1);
+            OneWayPanelBuilder.GeneratePanels(m, Boundary(m), new OneWayPanelOptions { NoSpacing = true, SpanningDirection = 0, AngleToleranceDeg = 15 }, 1, new List<string>());
+            Check(m.LoadPanels.Item[1].Receiving.SetEquals(new int[] { 2, 4 }), "Auto shorter on a rotated bay uses the bay's own edges");
+            Check(new OneWayPanelOptions { NoSpacing = true, SpanningDirection = 4, AngleToleranceDeg = 15 }.Validate() != null, "unknown span option rejected");
+
+            // Intermediate members inside the bay (4 wide in X, 8 long in Y; short span = X).
+            m = Rectangle(false);
+            int boundaryCount = m.Lines.Count;
+            int ia = m.Nodes.Add(1, 0, 0), ib = m.Nodes.Add(1, 8, 0);   // along Y = across the X span
+            int across = m.Lines.AddLine(ia, ib);
+            int pa = m.Nodes.Add(0, 4, 0), pb = m.Nodes.Add(4, 4, 0);   // along X = parallel to the span
+            int along = m.Lines.AddLine(pa, pb);
+            int ta = m.Nodes.Add(3, 0, 0), tb = m.Nodes.Add(3.5, 8, 0); // ~3.6 deg off "across"
+            int tilted = m.Lines.AddLine(ta, tb);
+            int plainA = m.Nodes.Add(2, 0, 0), plainB = m.Nodes.Add(2, 8, 0);
+            int plain = m.Lines.AddLine(plainA, plainB, ELineType.ltSimpleLine);
+            var boundaryOnly = Enumerable.Range(1, boundaryCount).Select(i => OneWayPanelBuilder.ResolveLine(m, i)).ToList();
+            var interiorNotes = new List<string>();
+            Check(OneWayPanelBuilder.GeneratePanels(m, boundaryOnly, new OneWayPanelOptions
+            { NoSpacing = true, AngleToleranceDeg = 5, UseSpanAngle = true, SpanAngleDeg = 0 }, 1, interiorNotes).Count == 1,
+                "single panel with interior members generated");
+            var recv = m.LoadPanels.Item[1].Receiving;
+            Check(recv.Contains(across) && recv.Contains(tilted), "interior members across the span (within tolerance) receive load");
+            Check(!recv.Contains(along) && !recv.Contains(plain), "members along the span and plain lines receive nothing");
+            Check(m.LoadPanels.Item[1].Selected.Values.Count(v => v) == 2, "edge flags still mark only the two boundary supports");
+            Check(interiorNotes.Any(n => n.Contains("2 intermediate member")), "interior receivers are reported");
+
+            m = Rectangle(false);
+            boundaryCount = m.Lines.Count;
+            ia = m.Nodes.Add(1, 0, 0); ib = m.Nodes.Add(1, 8, 0);
+            across = m.Lines.AddLine(ia, ib);
+            ta = m.Nodes.Add(3, 0, 0); tb = m.Nodes.Add(3.5, 8, 0);
+            tilted = m.Lines.AddLine(ta, tb);
+            boundaryOnly = Enumerable.Range(1, boundaryCount).Select(i => OneWayPanelBuilder.ResolveLine(m, i)).ToList();
+            OneWayPanelBuilder.GeneratePanels(m, boundaryOnly, new OneWayPanelOptions
+            { NoSpacing = true, AngleToleranceDeg = 2, UseSpanAngle = true, SpanAngleDeg = 0 }, 1, new List<string>());
+            recv = m.LoadPanels.Item[1].Receiving;
+            Check(recv.Contains(across) && !recv.Contains(tilted), "a member outside the tolerance receives nothing");
+
+            m = Rectangle(false);
+            boundaryCount = m.Lines.Count;
+            pa = m.Nodes.Add(0, 4, 0); pb = m.Nodes.Add(4, 4, 0);       // across the Y span, through the centre and both strips
+            int mid = m.Lines.AddLine(pa, pb);
+            boundaryOnly = Enumerable.Range(1, boundaryCount).Select(i => OneWayPanelBuilder.ResolveLine(m, i)).ToList();
+            Check(OneWayPanelBuilder.GeneratePanels(m, boundaryOnly, new OneWayPanelOptions
+            { EdgeSpacingMm = 300, AngleToleranceDeg = 10, UseSpanAngle = true, SpanAngleDeg = 90 }, 1, new List<string>()).Count == 3,
+                "edge strips generated with an intermediate beam");
+            int midNow = m.Lines.get_IndexOfUID(m.Lines.get_UID(mid));
+            Check(m.LoadPanels.Item[3].Receiving.Contains(midNow) &&
+                  !m.LoadPanels.Item[1].Receiving.Contains(midNow) && !m.LoadPanels.Item[2].Receiving.Contains(midNow),
+                "intermediate beam loads from the centre panel only, not from the edge strips");
+
             Console.WriteLine(checks + " checks passed.");
             return 0;
         }
@@ -140,6 +203,7 @@ namespace AxisVM
 {
     public enum ELongBoolean { False = 0, True = 1 }
     public enum ELineGeomType { lgtStraightLine }
+    public enum ELineType { ltTruss = 0, ltBeam = 1, ltRib = 2, ltSimpleLine = 7 }
     public struct RLineGeomData { }
     public struct RNode { public double x, y, z; }
     public sealed class IAxisVMModel
@@ -163,14 +227,15 @@ namespace AxisVM
         internal Lines Owner;
         internal int Uid;
         public int StartNode, EndNode;
+        public ELineType LineType = ELineType.ltBeam;
         public ELineGeomType GeomType { get { return ELineGeomType.lgtStraightLine; } }
         public int SplitByNode(int node, out int first, out int second)
         {
             first = second = 0;
             if (++Owner.SplitCalls == Owner.FailSplitAt) return -1;
             Owner.Delete(Owner.get_IndexOfUID(Uid));
-            first = Owner.AddLine(StartNode, node);
-            second = Owner.AddLine(node, EndNode);
+            first = Owner.AddLine(StartNode, node, LineType);
+            second = Owner.AddLine(node, EndNode, LineType);
             return 1;
         }
     }
@@ -183,8 +248,9 @@ namespace AxisVM
         public Lines Item { get { return this; } }
         [System.Runtime.CompilerServices.IndexerName("Entry")]
         public Line this[int id] { get { return data[id - 1]; } }
-        public int AddLine(int a, int b) { data.Add(new Line { Owner = this, Uid = ++nextUid, StartNode = a, EndNode = b }); return Count; }
-        public int Add(int a, int b, ELineGeomType type, ref RLineGeomData geom) { return AddLine(a, b); }
+        public int AddLine(int a, int b, ELineType type = ELineType.ltBeam) { data.Add(new Line { Owner = this, Uid = ++nextUid, StartNode = a, EndNode = b, LineType = type }); return Count; }
+        // IAxisVMLines.Add makes a plain line without an element, as in AxisVM.
+        public int Add(int a, int b, ELineGeomType type, ref RLineGeomData geom) { return AddLine(a, b, ELineType.ltSimpleLine); }
         public int get_UID(int id) { return this[id].Uid; }
         public int get_IndexOfUID(int uid) { return data.FindIndex(l => l.Uid == uid) + 1; }
         public int Delete(int id) { data.RemoveAt(id - 1); return 1; }

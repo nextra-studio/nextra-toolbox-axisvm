@@ -7,6 +7,10 @@ using AxisVMDotNetAddonPluginInterface_v1_0;
 
 namespace AxisVM_plugin.Addons
 {
+    /// <summary>
+    /// "N. One-Way Load Panel": converts selected load panels, or builds panels from selected
+    /// boundary lines (see <see cref="AxisVM_plugin.Functions.OneWayLoadPanelLogic"/>).
+    /// </summary>
     public class OneWayLoadPanelAddon : IAxisVMDotNetAddonPluginInterface_v1_0
     {
         public int Version { get { return 1; } }
@@ -15,11 +19,11 @@ namespace AxisVM_plugin.Addons
         public int AxisVMMainFormHandle { get; set; }
         public int AxisVMApplicationHandle { get; set; }
 
-        public string Plugin_MenuItemText { get { return "N. Lines -> One-Way Panel"; } }
+        public string Plugin_MenuItemText { get { return "N. One-Way Load Panel"; } }
 
         public string Plugin_GetTranslatedMenuItemText(int PrgLang)
         {
-            return "N. Lines -> One-Way Panel";
+            return "N. One-Way Load Panel";
         }
 
         public int Plugin_IsMenuItemEnabled(object iAxisVMApp) { return 1; }
@@ -41,8 +45,8 @@ namespace AxisVM_plugin.Addons
         }
 
         // Addon methods (toolbar)
-        public string Addon_HintText { get { return "Create one-way load panels from selected boundary lines"; } }
-        public string Addon_GetTranslatedHintText(int PrgLang) { return "N. Lines -> One-Way Panel"; }
+        public string Addon_HintText { get { return "Convert selected load panels, or selected boundary lines, into one-way load panels"; } }
+        public string Addon_GetTranslatedHintText(int PrgLang) { return "N. One-Way Load Panel"; }
         public int Addon_IsItemEnabled(object iAxisVMApp) { return 1; }
         public int Addon_IsItemVisible(object iAxisVMApp) { return 1; }
         public int Addon_IsModalWindow { get { return 0; } }

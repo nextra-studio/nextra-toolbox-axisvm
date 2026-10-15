@@ -50,8 +50,10 @@ namespace AxisVM_plugin.Core
             int idx;
             if (cache.TryGetValue(key, out idx)) return idx;
 
-            string name = string.Format(CultureInfo.InvariantCulture, "AxImport {0}{1} {2:0.###E+00}",
-                line ? "line " : "", translational ? "transl" : "rot", k);
+            // Round-trip formatting: two different stiffnesses never share a name, and so never share
+            // a characteristic through IndexOfName.
+            string name = string.Format(CultureInfo.InvariantCulture, "AxI {0} {1} {2}",
+                line ? "L" : "N", translational ? "T" : "R", k.ToString("R", CultureInfo.InvariantCulture));
 
             try
             {

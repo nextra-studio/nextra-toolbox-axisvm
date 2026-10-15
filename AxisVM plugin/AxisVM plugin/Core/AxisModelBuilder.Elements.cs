@@ -57,9 +57,15 @@ namespace AxisVM_plugin.Core
 
                 ResolvedProfile prof = ResolveProfile(job);
                 List<SegRef> owned = new List<SegRef>();
+                double cum = 0;
 
                 foreach (SegRef s in job.Chain.Segs)
                 {
+                    // Where this segment starts / ends along the whole curve (0..1), for eccentricity.
+                    double t0 = job.Chain.Total > 0 ? cum / job.Chain.Total : 0;
+                    cum += s.Length;
+                    double t1 = job.Chain.Total > 0 ? cum / job.Chain.Total : 1;
+
                     LineJob owner;
                     if (!segmentOwner.TryGetValue(s.Id, out owner) || owner != job) continue;
 
@@ -72,7 +78,7 @@ namespace AxisVM_plugin.Core
                             notes.Add(job.Context + ": lies on a domain edge - created as a Rib instead of a Beam.");
                     }
 
-                    if (ApplyFrameType(s, job, role, prof)) { segmentRole[s.Id] = role; owned.Add(s); }
+                    if (ApplyFrameType(s, job, ref role, prof, t0, t1)) { segmentRole[s.Id] = role; owned.Add(s); }
                 }
 
                 if (owned.Count == 0) continue;
@@ -146,13 +152,17 @@ namespace AxisVM_plugin.Core
         }
 
         /// <summary>Types one segment as beam / rib / truss with material, section and eccentricity.</summary>
-        private bool ApplyFrameType(SegRef s, LineJob job, LineRole role, ResolvedProfile p)
+        private bool ApplyFrameType(SegRef s, LineJob job, ref LineRole role, ResolvedProfile p, double t0, double t1)
+        {
+            if (!DefineFrame(s, job, ref role, p)) return false;
+            OrientAndOffset(s, job, role, p, t0, t1);
+            return true;
+        }
+
+        /// <summary>Sets type, material and sections. Return codes are checked - AxisVM reports most rejections that way, not by throwing.</summary>
+        private bool DefineFrame(SegRef s, LineJob job, ref LineRole role, ResolvedProfile p)
         {
             ELineType lineType = role == LineRole.Rib ? ELineType.ltRib : role == LineRole.Truss ? ELineType.ltTruss : ELineType.ltBeam;
-
-            // Eccentricity follows the Rhino curve: on a reversed segment start and end swap.
-            RPoint3d e1 = p.HasEcc ? Point(s.Reversed ? p.EccEnd : p.EccStart) : new RPoint3d();
-            RPoint3d e2 = p.HasEcc ? Point(s.Reversed ? p.EccStart : p.EccEnd) : new RPoint3d();
 
             RLineAttr attr;
             if (TryGetLineAttr(s.Id, out attr))
@@ -161,40 +171,109 @@ namespace AxisVM_plugin.Core
                 if (p.Material > 0) attr.MaterialIndex = p.Material;
                 if (p.StartSection > 0) attr.StartCrossSectionIndex = p.StartSection;
                 if (p.EndSection > 0) attr.EndCrossSectionIndex = p.EndSection;
-                if (p.HasEcc && role != LineRole.Truss)
-                {
-                    attr.StartEccentricity = e1;
-                    attr.EndEccentricity = e2;
-                }
-                if (TrySetLineAttr(s.Id, attr)) return true;
+                if (TrySetLineAttr(s.Id, attr) && LineTypeIs(s.Id, lineType)) return true;
             }
 
-            // Fallback: the explicit Define* calls.
+            // Fallback: the explicit Define* calls (eccentricity is written afterwards via the V161 record).
+            RPoint3d e1 = new RPoint3d(), e2 = new RPoint3d();
             try
             {
                 IAxisVMLine line = model.Lines.Item[s.Id];
                 if (role == LineRole.Truss)
                 {
-                    line.DefineAsTruss(p.Material, p.StartSection, ELineNonLinearity.lnlTensionAndCompression, 0.0);
-                    return true;
+                    if (line.DefineAsTruss(p.Material, p.StartSection, ELineNonLinearity.lnlTensionAndCompression, 0.0) > 0) return true;
+                    notes.Add(job.Context + ": AxisVM rejected the truss definition.");
+                    return false;
                 }
                 if (role == LineRole.Beam)
                 {
-                    try { line.DefineAsBeam(p.Material, p.StartSection, p.EndSection, ref e1, ref e2); return true; }
-                    catch
-                    {
-                        notes.Add(job.Context + ": AxisVM rejected a Beam here - defined as a Rib instead.");
-                        role = LineRole.Rib;
-                    }
+                    int rc;
+                    try { rc = line.DefineAsBeam(p.Material, p.StartSection, p.EndSection, ref e1, ref e2); } catch { rc = 0; }
+                    if (rc > 0) return true;
+                    notes.Add(job.Context + ": AxisVM rejected a Beam here - defined as a Rib instead.");
+                    role = LineRole.Rib;
                 }
-                line.DefineAsRib(p.Material, p.StartSection, p.EndSection, ref e1, ref e2);
-                return true;
+                if (line.DefineAsRib(p.Material, p.StartSection, p.EndSection, ref e1, ref e2) > 0) return true;
+                notes.Add(job.Context + ": AxisVM rejected the member definition (check its material and section).");
+                return false;
             }
             catch (Exception ex)
             {
                 notes.Add(string.Format("{0}: AxisVM rejected its element type ({1}).", job.Context, ex.Message));
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Makes the segment's local x run in the Rhino curve direction (so every piece of a split
+        /// member has the same local axes and local loads mean the same thing on all of them), and
+        /// writes the eccentricity as a custom offset at the matching physical ends.
+        /// </summary>
+        private void OrientAndOffset(SegRef s, LineJob job, LineRole role, ResolvedProfile p, double t0, double t1)
+        {
+            if (s.CurveStartNode <= 0 || s.CurveEndNode <= 0) return;
+            bool curveStartIsLower = s.CurveStartNode < s.CurveEndNode;
+
+            RLineAttr_V161 a;
+            if (!TryGetLineAttrV161(s.Id, out a)) return;
+
+            a.LocalXOrientation = curveStartIsLower ? EMemberLocXOrientation.mlxo_ij : EMemberLocXOrientation.mlxo_ji;
+            if (p.HasEcc && role != LineRole.Truss)
+            {
+                // A curve split into pieces gets its offset interpolated along its length, so a
+                // tapering eccentricity stays continuous. Start/End fields = lower / higher index node.
+                RhinoXyz e0 = LerpXyz(p.EccStart, p.EccEnd, t0), e1 = LerpXyz(p.EccStart, p.EccEnd, t1);
+                a.StartEccentricityType = ELEEccType.leet_CustomOffset;
+                a.EndEccentricityType = ELEEccType.leet_CustomOffset;
+                a.StartEccentricity = Point(curveStartIsLower ? e0 : e1);
+                a.EndEccentricity = Point(curveStartIsLower ? e1 : e0);
+            }
+            a.Beam7DOF = ELongBoolean.lbFalse;
+
+            if (TrySetLineAttrV161(s.Id, a))
+            {
+                // Only cache what AxisVM accepted - load placement relies on it.
+                localXStartNode[s.Id] = s.CurveStartNode;
+            }
+            else notes.Add(job.Context + (p.HasEcc ? ": its eccentricity / orientation could not be set." : ": its local x orientation could not be set."));
+        }
+
+        private static RhinoXyz LerpXyz(RhinoXyz a, RhinoXyz b, double t)
+        {
+            return new RhinoXyz(a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t, a.Z + (b.Z - a.Z) * t);
+        }
+
+        /// <summary>Live line id -> the node its local x starts at (set by <see cref="OrientAndOffset"/>).</summary>
+        private readonly Dictionary<int, int> localXStartNode = new Dictionary<int, int>();
+
+        /// <summary>
+        /// True when the segment's local x runs against <paramref name="s"/>'s curve direction - only
+        /// possible where another curve owns (and therefore oriented) the segment.
+        /// </summary>
+        private bool LocalAgainstCurve(SegRef s)
+        {
+            int localStart;
+            if (!localXStartNode.TryGetValue(s.Id, out localStart))
+            {
+                // Not oriented by us: AxisVM's StartNode is where local x starts.
+                int startNode, endNode;
+                if (!LineNodes(s.Id, out startNode, out endNode)) return s.Reversed;
+                localStart = startNode;
+            }
+            return s.CurveStartNode != localStart;
+        }
+
+        private bool LineNodes(int lineId, out int startNode, out int endNode)
+        {
+            startNode = endNode = 0;
+            try
+            {
+                IAxisVMLine ln = model.Lines.Item[lineId];
+                startNode = ln.StartNode;
+                endNode = ln.EndNode;
+                return true;
+            }
+            catch { return false; }
         }
 
         private void ApplyLocalAxis(List<SegRef> segs, LineJob job)
@@ -261,19 +340,11 @@ namespace AxisVM_plugin.Core
         private bool SetEndRelease(SegRef s, bool atRhinoStart, ReleaseSet set, out string error)
         {
             error = null;
-            int startNode, endNode;
-            try
-            {
-                IAxisVMLine ln = model.Lines.Item[s.Id];
-                startNode = ln.StartNode;
-                endNode = ln.EndNode;
-            }
-            catch (Exception ex) { error = ex.Message; return false; }
-
-            // The node at the requested Rhino end of this segment:
-            bool wantLineStart = atRhinoStart != s.Reversed;
-            int node = wantLineStart ? startNode : endNode;
-            bool atLowerIndex = node == Math.Min(startNode, endNode);
+            // The physical node at the requested curve end; the record's StartRelease belongs to the
+            // lower-index node whatever the line's current local x orientation is.
+            int node = atRhinoStart ? s.CurveStartNode : s.CurveEndNode;
+            if (node <= 0) { error = "the end node is unknown"; return false; }
+            bool atLowerIndex = node == Math.Min(s.CurveStartNode, s.CurveEndNode);
 
             RLineAttr_V161 a;
             if (!TryGetLineAttrV161(s.Id, out a)) { error = "BulkGetAttr_V161 failed"; return false; }
@@ -484,9 +555,13 @@ namespace AxisVM_plugin.Core
             try
             {
                 RStiffnesses s = ToStiffnesses(k);
-                model.Lines.Item[lineId].DefineAsSpring(ESpringDirection.sdGlobal, ref s);
-                stats.SpringsCreated++;
-                segmentRole[lineId] = LineRole.Spring;
+                int rc = model.Lines.Item[lineId].DefineAsSpring(ESpringDirection.sdGlobal, ref s);
+                if (rc > 0)
+                {
+                    stats.SpringsCreated++;
+                    segmentRole[lineId] = LineRole.Spring;
+                }
+                else notes.Add(string.Format("{0}: AxisVM rejected the spring definition (code {1}).", job.Context, rc));
             }
             catch (Exception ex)
             {

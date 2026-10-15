@@ -35,6 +35,7 @@ namespace AxisBridge.Visualize
             ("Thickness",     AxKeys.Thickness,     false),
             ("SpanDirection", AxKeys.SpanDirection, false),
             ("EdgeSpacing",   AxKeys.EdgeSpacing,   false),
+            ("SpanTolerance", AxKeys.SpanTolerance, false),
             ("Parts",         AxKeys.Parts,         false),
             ("HingeDomains",  AxKeys.HingeDomains,  false),
             ("CoupledDOF",    AxKeys.CoupledDof,    false),
@@ -82,6 +83,10 @@ namespace AxisBridge.Visualize
 
                 Point3d centre = AxClassify.AnchorOf(obj);
                 Curve crv = obj.Geometry as Curve;
+
+                // One-way load panels: a double arrow along the span (same rule as the importer).
+                if (AxSchema.NormalizeSurfaceType(AttrReader.GetAttribute(obj, AxKeys.FeType)) == AxSchema.OneWayLoadPanel)
+                    dots += SpanArrows(doc, obj, usedCategories, ref categoryCount);
 
                 for (int ci = 0; ci < Categories.Length; ci++)
                 {
@@ -159,6 +164,26 @@ namespace AxisBridge.Visualize
             if (!LoadRow.TryParse(kind, value, out row)) return Label("Load", value);
             string s = row.Summary(kind);
             return s.Length > 40 ? s.Substring(0, 39) + "…" : s;
+        }
+
+        private static int SpanArrows(RhinoDoc doc, RhinoObject obj, HashSet<string> used, ref int count)
+        {
+            int layer = EnsureCat(doc, "SpanDirection", used, ref count);
+            int made = 0;
+            string value = AttrReader.GetAttribute(obj, AxKeys.SpanDirection);
+            foreach (List<Point3d> outline in SpanTools.Outlines(obj, doc.ModelAbsoluteTolerance))
+            {
+                Vector3d dir;
+                if (!SpanTools.Resolve(value, outline, out dir)) continue;
+                BoundingBox bb = new BoundingBox(outline);
+                double half = 0.3 * Math.Max(bb.Diagonal.X, bb.Diagonal.Y);
+                Point3d c = bb.Center;
+                var oa = new ObjectAttributes { LayerIndex = layer, ObjectDecoration = ObjectDecoration.BothArrowhead, ColorSource = ObjectColorSource.ColorFromObject, ObjectColor = System.Drawing.Color.FromArgb(0, 110, 220) };
+                oa.SetUserString("Ax_TagOf", obj.Id.ToString());
+                doc.Objects.AddLine(new Line(c - dir * half, c + dir * half), oa);
+                made++;
+            }
+            return made;
         }
 
         private static string Label(string category, string value)

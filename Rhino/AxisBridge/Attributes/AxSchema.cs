@@ -75,8 +75,8 @@ namespace AxisBridge.Attributes
                 { Plate,           Set(AxKeys.FeType, AxKeys.Material, AxKeys.Thickness, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.Parts) },
                 { Membrane,        Set(AxKeys.FeType, AxKeys.Material, AxKeys.Thickness, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.Parts) },
                 // A load panel is NOT a domain in AxisVM: no material, thickness, axis, eccentricity or parts.
-                { LoadPanel,       Set(AxKeys.FeType, AxKeys.PointLoad, AxKeys.DistLoad) },
-                { OneWayLoadPanel, Set(AxKeys.FeType, AxKeys.SpanDirection, AxKeys.EdgeSpacing, AxKeys.PointLoad, AxKeys.DistLoad) },
+                { LoadPanel,       Set(AxKeys.FeType, AxKeys.LoadTargets, AxKeys.PointLoad, AxKeys.DistLoad) },
+                { OneWayLoadPanel, Set(AxKeys.FeType, AxKeys.SpanDirection, AxKeys.EdgeSpacing, AxKeys.SpanTolerance, AxKeys.PointLoad, AxKeys.DistLoad) },
             };
 
         private static readonly HashSet<string> PointKeys = Set(AxKeys.Support, AxKeys.NodalLoad, AxKeys.Parts);

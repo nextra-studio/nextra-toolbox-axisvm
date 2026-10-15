@@ -175,6 +175,13 @@ namespace AxisVM_plugin.Core
             public int Id;
             /// <summary>The AxisVM line runs against the Rhino curve direction (its start node is at the far side).</summary>
             public bool Reversed;
+            /// <summary>
+            /// Physical node ids at the curve-start and curve-end side of this segment. These - not the
+            /// line's StartNode/EndNode, which follow local x and change when it is re-oriented - are
+            /// what releases, eccentricities and load positions are mapped with.
+            /// </summary>
+            public int CurveStartNode;
+            public int CurveEndNode;
             public double Length;
             /// <summary>Which straight piece of a polyline this segment belongs to (members are assembled per piece).</summary>
             public int Piece;
@@ -224,16 +231,33 @@ namespace AxisVM_plugin.Core
         // Entry point
         // ==================================================================
 
+        /// <summary>UIDs of the lines that existed before this import. They are never split, merged or deleted.</summary>
+        private readonly HashSet<int> preexistingLineUids = new HashSet<int>();
+
         public void Run()
         {
             ValidateAttributeNames();
             PrepareJobs();
+
+            if (!opt.DryRun)
+            {
+                int n = SafeLineCount();
+                for (int i = 1; i <= n; i++)
+                {
+                    try { preexistingLineUids.Add(model.Lines.get_UID(i)); } catch { }
+                }
+            }
 
             if (!opt.DryRun) catalog.CreateLibraryLoadCases();
 
             BuildGeometry();
 
             if (opt.AutoIntersect && !opt.DryRun) IntersectAndResolve();
+
+            // One-way panels with edge strips split their boundary lines (SplitByNode inside the
+            // panel generator), which re-indexes lines. So they are built first and every chain is
+            // re-resolved before any id is used.
+            BuildOneWayPanels();
 
             ApplyMemberTypes();
             BuildSurfaces();
@@ -329,7 +353,16 @@ namespace AxisVM_plugin.Core
 
         private void BuildGeometry()
         {
+            // Every node first. Then each straight line is cut at every node lying on it, so a beam
+            // running along a slab edge (or across a vertex in it) and that slab edge end up as the
+            // SAME AxisVM lines - never two lines on top of each other.
             foreach (RhinoPoint p in rhino.Points) NodeFor(M(p.Xyz));
+            foreach (LineJob job in lineJobs) foreach (double[] v in job.Path) NodeFor(v);
+            foreach (SurfaceJob sj in surfaceJobs)
+            {
+                foreach (double[] v in sj.Outer) NodeFor(v);
+                foreach (List<double[]> h in sj.Holes) foreach (double[] v in h) NodeFor(v);
+            }
 
             // Curves first, so a slab edge drawn exactly on top of a beam reuses the beam's line.
             foreach (LineJob job in lineJobs)
@@ -344,21 +377,27 @@ namespace AxisVM_plugin.Core
                     bl.UsedByCrossable = false;
                     bl.UsedByConnector = true;   // never handed to CrossLines (see IntersectAndResolve)
                     bl.RhinoUses++;
-                    job.Chain.Add(new SegRef { Id = bl.Id, Reversed = bl.NodeA != a, Length = ArcLength(job.Path[0], job.ArcMid, job.Path[job.Path.Count - 1]) });
+                    job.Chain.Add(new SegRef { Id = bl.Id, Reversed = bl.NodeA != a, CurveStartNode = a, CurveEndNode = b, Length = ArcLength(job.Path[0], job.ArcMid, job.Path[job.Path.Count - 1]) });
                     continue;
                 }
 
                 for (int i = 0; i + 1 < job.Path.Count; i++)
                 {
-                    int a = NodeFor(job.Path[i]);
-                    int b = NodeFor(job.Path[i + 1]);
-                    if (a == 0 || b == 0 || a == b) continue;
+                    // Springs and links join exactly their own two end points - never cut.
+                    List<double[]> stops = job.Crossable ? StopsAlong(job.Path[i], job.Path[i + 1])
+                                                         : new List<double[]> { job.Path[i], job.Path[i + 1] };
+                    for (int k = 0; k + 1 < stops.Count; k++)
+                    {
+                        int a = NodeFor(stops[k]);
+                        int b = NodeFor(stops[k + 1]);
+                        if (a == 0 || b == 0 || a == b) continue;
 
-                    BuiltLine bl = LineFor(a, b);
-                    if (bl == null) continue;
-                    if (job.Crossable) bl.UsedByCrossable = true; else bl.UsedByConnector = true;
-                    bl.RhinoUses++;
-                    job.Chain.Add(new SegRef { Id = bl.Id, Reversed = bl.NodeA != a, Length = Dist(job.Path[i], job.Path[i + 1]), Piece = i });
+                        BuiltLine bl = LineFor(a, b);
+                        if (bl == null) continue;
+                        if (job.Crossable) bl.UsedByCrossable = true; else bl.UsedByConnector = true;
+                        bl.RhinoUses++;
+                        job.Chain.Add(new SegRef { Id = bl.Id, Reversed = bl.NodeA != a, CurveStartNode = a, CurveEndNode = b, Length = Dist(stops[k], stops[k + 1]), Piece = i });
+                    }
                 }
 
                 if (job.Chain.IsEmpty) SkipShort(job);
@@ -373,7 +412,7 @@ namespace AxisVM_plugin.Core
             foreach (BuiltLine bl in builtByKey.Values)
                 if (bl.RhinoUses > 1) stats.LinesMerged += bl.RhinoUses - 1;
             if (stats.LinesMerged > 0)
-                notes.Add(string.Format("{0} Rhino curve(s) lay exactly on another curve and share its AxisVM line (the first typed curve decides the element type).", stats.LinesMerged));
+                notes.Add(string.Format("{0} overlapping line piece(s) (members on slab edges, curves drawn on top of each other) were merged into one AxisVM line each.", stats.LinesMerged));
         }
 
         private void SkipShort(LineJob job)
@@ -386,16 +425,50 @@ namespace AxisVM_plugin.Core
             Chain c = new Chain();
             for (int i = 0; i < loop.Count; i++)
             {
-                double[] p = loop[i], q = loop[(i + 1) % loop.Count];
-                int a = NodeFor(p);
-                int b = NodeFor(q);
-                if (a == 0 || b == 0 || a == b) continue;
-                BuiltLine bl = LineFor(a, b);
-                if (bl == null) continue;
-                bl.UsedByCrossable = true;
-                c.Add(new SegRef { Id = bl.Id, Reversed = bl.NodeA != a, Length = Dist(p, q), Piece = i });
+                List<double[]> stops = StopsAlong(loop[i], loop[(i + 1) % loop.Count]);
+                for (int k = 0; k + 1 < stops.Count; k++)
+                {
+                    int a = NodeFor(stops[k]);
+                    int b = NodeFor(stops[k + 1]);
+                    if (a == 0 || b == 0 || a == b) continue;
+                    BuiltLine bl = LineFor(a, b);
+                    if (bl == null) continue;
+                    bl.UsedByCrossable = true;
+                    bl.RhinoUses++;
+                    c.Add(new SegRef { Id = bl.Id, Reversed = bl.NodeA != a, CurveStartNode = a, CurveEndNode = b, Length = Dist(stops[k], stops[k + 1]), Piece = i });
+                }
             }
             return c;
+        }
+
+        /// <summary>
+        /// p, every imported node lying strictly inside p-q (ordered from p), and q. Cutting at these
+        /// is what keeps overlapping members and slab edges on one shared set of lines.
+        /// </summary>
+        private List<double[]> StopsAlong(double[] p, double[] q)
+        {
+            double tol = Math.Max(opt.MergeToleranceM, 1e-6);
+            List<KeyValuePair<double, double[]>> inner = new List<KeyValuePair<double, double[]>>();
+
+            double ux = q[0] - p[0], uy = q[1] - p[1], uz = q[2] - p[2];
+            double len = Math.Sqrt(ux * ux + uy * uy + uz * uz);
+            if (len > 2 * tol)
+            {
+                ux /= len; uy /= len; uz /= len;
+                foreach (double[] n in importedNodePositions)
+                {
+                    double t;
+                    if (!OnLine(p, ux, uy, uz, n, tol, out t)) continue;
+                    if (t <= tol || t >= len - tol) continue;
+                    inner.Add(new KeyValuePair<double, double[]>(t, n));
+                }
+                inner.Sort((x, y) => x.Key.CompareTo(y.Key));
+            }
+
+            List<double[]> stops = new List<double[]> { p };
+            foreach (var kv in inner) stops.Add(kv.Value);
+            stops.Add(q);
+            return stops;
         }
 
         /// <summary>
@@ -559,6 +632,9 @@ namespace AxisVM_plugin.Core
             public int NodeB;
             public double[] A;
             public double[] B;
+            public bool IsArc;
+            /// <summary>The line was already in the model before the import - leave it alone.</summary>
+            public bool Preexisting;
         }
 
         private void IntersectAndResolve()
@@ -584,6 +660,7 @@ namespace AxisVM_plugin.Core
             }
 
             SplitAtImportedNodes(tol);
+            RemoveDuplicateLines(tol);
 
             int linesAfter = SafeLineCount();
             if (linesAfter > linesBefore)
@@ -604,6 +681,10 @@ namespace AxisVM_plugin.Core
         /// </summary>
         private void SplitAtImportedNodes(double tol)
         {
+            // Candidates AxisVM refused (e.g. "node not on line" at a slightly looser tolerance than
+            // ours). Keyed by geometry, because every successful split re-indexes the lines.
+            HashSet<string> refused = new HashSet<string>(StringComparer.Ordinal);
+
             for (int guard = 0; guard < 5000; guard++)
             {
                 LiveModel live = ReadLive(tol);
@@ -617,22 +698,58 @@ namespace AxisVM_plugin.Core
 
                     foreach (LiveSeg s in live.Segs)
                     {
-                        if (protectedIds.Contains(s.Id) || s.NodeA == nodeId || s.NodeB == nodeId) continue;
+                        if (s.IsArc || s.Preexisting || protectedIds.Contains(s.Id) || s.NodeA == nodeId || s.NodeB == nodeId) continue;
                         if (!Interior(s.A, s.B, p, tol)) continue;
 
-                        try
-                        {
-                            int l1, l2;
-                            model.Lines.Item[s.Id].SplitByNode(nodeId, out l1, out l2);
-                            split = true;
-                        }
-                        catch { }
-                        break;
+                        string key = Fmt(p) + Fmt(s.A) + Fmt(s.B);
+                        if (refused.Contains(key)) continue;
+
+                        int rc, l1 = 0, l2 = 0;
+                        try { rc = model.Lines.Item[s.Id].SplitByNode(nodeId, out l1, out l2); }
+                        catch { rc = 0; }
+
+                        if (rc > 0) { split = true; break; }
+                        refused.Add(key);
+                        notes.Add(string.Format("The node at {0} lies on a line but AxisVM refused to split it there (code {1}); it may be unconnected.", Fmt(p), rc));
                     }
                     if (split) break;   // indices changed - re-read the model
                 }
                 if (!split) return;
             }
+        }
+
+        /// <summary>
+        /// After intersection two straight lines can join the same two nodes (e.g. a beam that
+        /// overlapped a slab edge). Keep one, delete the rest - never two lines on top of each other.
+        /// Springs, links and arcs are left alone.
+        /// </summary>
+        private void RemoveDuplicateLines(double tol)
+        {
+            LiveModel live = ReadLive(tol);
+            HashSet<int> protectedIds = ProtectedLines(live);
+            List<int> extra = new List<int>();
+
+            foreach (List<LiveSeg> group in live.ByPair.Values)
+            {
+                if (group.Count < 2) continue;
+                // Only this import's own lines - an existing model line (with its own properties and
+                // loads) is never deleted, even when an imported line duplicates it.
+                List<LiveSeg> straight = group.FindAll(x => !x.IsArc && !x.Preexisting && !protectedIds.Contains(x.Id));
+                if (straight.Count < 2) continue;
+                straight.Sort((x, y) => x.Id.CompareTo(y.Id));
+                for (int i = 1; i < straight.Count; i++) extra.Add(straight[i].Id);
+            }
+            if (extra.Count == 0) return;
+
+            // Highest index first, so the indices still to delete do not shift.
+            extra.Sort();
+            int removed = 0;
+            for (int i = extra.Count - 1; i >= 0; i--)
+            {
+                try { if (model.Lines.Delete(extra[i]) > 0) removed++; } catch { }
+            }
+            if (removed > 0)
+                notes.Add(string.Format("Auto-intersection: {0} duplicate line(s) on top of another line were removed.", removed));
         }
 
         /// <summary>Live lines that belong to springs, links or arcs (matched by their end nodes).</summary>
@@ -648,9 +765,46 @@ namespace AxisVM_plugin.Core
                 if (!live.Index.TryFind(e[0], e[1], e[2], out b)) continue;
                 List<LiveSeg> hits;
                 if (live.ByPair.TryGetValue(PairKey(a, b), out hits))
-                    foreach (LiveSeg s in hits) ids.Add(s.Id);
+                {
+                    LiveSeg pick = PickByMid(hits, job);
+                    if (pick != null) ids.Add(pick.Id);
+                }
             }
             return ids;
+        }
+
+        /// <summary>
+        /// Of several lines joining the same two nodes (an arc and its chord, two arcs), the one whose
+        /// geometry matches the job: arcs by AxisVM's own midpoint, straight jobs prefer straight lines.
+        /// </summary>
+        private LiveSeg PickByMid(List<LiveSeg> hits, LineJob job)
+        {
+            if (hits == null || hits.Count == 0) return null;
+            if (hits.Count == 1) return hits[0];
+
+            bool wantArc = job.ArcMid != null;
+            double[] mid = wantArc ? job.ArcMid : Mid(job.Path[0], job.Path[job.Path.Count - 1]);
+
+            LiveSeg best = null;
+            double bestD = double.MaxValue;
+            foreach (LiveSeg s in hits)
+            {
+                double d = s.IsArc == wantArc ? 0 : 1e6;
+                try
+                {
+                    RPoint3d m = new RPoint3d();
+                    model.Lines.Item[s.Id].GetMidPoint(ref m);
+                    d += Dist(new[] { m.x, m.y, m.z }, mid);
+                }
+                catch { }
+                if (d < bestD) { bestD = d; best = s; }
+            }
+            return best;
+        }
+
+        private static double[] Mid(double[] a, double[] b)
+        {
+            return new[] { (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2 };
         }
 
         private class LiveModel
@@ -683,7 +837,11 @@ namespace AxisVM_plugin.Core
                     int na = ln.StartNode, nb = ln.EndNode;
                     double[] a, b;
                     if (!xyz.TryGetValue(na, out a) || !xyz.TryGetValue(nb, out b)) continue;
-                    LiveSeg s = new LiveSeg { Id = i, NodeA = na, NodeB = nb, A = a, B = b };
+                    bool arc = false;
+                    try { arc = ln.GeomType == ELineGeomType.lgtCircleArc; } catch { }
+                    bool old = false;
+                    try { old = preexistingLineUids.Contains(model.Lines.get_UID(i)); } catch { }
+                    LiveSeg s = new LiveSeg { Id = i, NodeA = na, NodeB = nb, A = a, B = b, IsArc = arc, Preexisting = old };
                     live.Segs.Add(s);
 
                     string key = PairKey(na, nb);
@@ -704,7 +862,7 @@ namespace AxisVM_plugin.Core
             HashSet<int> protectedIds = ProtectedLines(live);
 
             List<LiveSeg> crossable = new List<LiveSeg>();
-            foreach (LiveSeg s in live.Segs) if (!protectedIds.Contains(s.Id)) crossable.Add(s);
+            foreach (LiveSeg s in live.Segs) if (!protectedIds.Contains(s.Id) && !s.IsArc && !s.Preexisting) crossable.Add(s);
 
             foreach (LineJob job in lineJobs)
             {
@@ -713,8 +871,8 @@ namespace AxisVM_plugin.Core
                 Chain c = new Chain();
                 if (!job.Crossable)
                 {
-                    SegRef r = DirectSeg(live, job.Path[0], job.Path[job.Path.Count - 1], tol);
-                    if (r != null) { r.Length = job.Chain.Total; c.Add(r); }
+                    SegRef r = DirectSeg(live, job);
+                    if (r != null) c.Add(r);
                 }
                 else
                 {
@@ -741,13 +899,16 @@ namespace AxisVM_plugin.Core
             }
         }
 
-        private SegRef DirectSeg(LiveModel live, double[] p0, double[] p1, double tol)
+        private SegRef DirectSeg(LiveModel live, LineJob job)
         {
+            double[] p0 = job.Path[0], p1 = job.Path[job.Path.Count - 1];
             int a, b;
             if (!live.Index.TryFind(p0[0], p0[1], p0[2], out a) || !live.Index.TryFind(p1[0], p1[1], p1[2], out b)) return null;
             List<LiveSeg> hits;
-            if (!live.ByPair.TryGetValue(PairKey(a, b), out hits) || hits.Count == 0) return null;
-            return new SegRef { Id = hits[0].Id, Reversed = hits[0].NodeA != a, Length = Dist(p0, p1) };
+            if (!live.ByPair.TryGetValue(PairKey(a, b), out hits)) return null;
+            LiveSeg s = PickByMid(hits, job);
+            if (s == null) return null;
+            return new SegRef { Id = s.Id, Reversed = s.NodeA != a, CurveStartNode = a, CurveEndNode = b, Length = job.Chain.Total };
         }
 
         private Chain LoopAlong(List<double[]> loop, List<LiveSeg> segs, double tol)
@@ -805,7 +966,13 @@ namespace AxisVM_plugin.Core
                 double lo = Math.Min(t[0], t[1]), hi = Math.Max(t[0], t[1]);
                 if (lo > cursor + slack) return new List<SegRef>();   // gap
                 if (hi <= cursor + slack) continue;                    // duplicate / overlapping segment
-                result.Add(new SegRef { Id = h.Value.Id, Reversed = t[0] > t[1], Length = hi - lo, Piece = piece });
+                bool rev = t[0] > t[1];
+                result.Add(new SegRef
+                {
+                    Id = h.Value.Id, Reversed = rev, Length = hi - lo, Piece = piece,
+                    CurveStartNode = rev ? h.Value.NodeB : h.Value.NodeA,
+                    CurveEndNode = rev ? h.Value.NodeA : h.Value.NodeB
+                });
                 cursor = hi;
             }
 

@@ -131,18 +131,21 @@ namespace AxisBridge.UI
             // Legacy spellings ("rigid link", "nodenodelink") are shown as their canonical type.
             FieldState t = State.Get(AxKeys.Type);
             string typeNow = t.Kind == FieldStateKind.Same ? (AxSchema.NormalizeLineType(t.Value) ?? AxSchema.Beam) : AxSchema.Beam;
-            type.Load(t.Kind == FieldStateKind.Same ? FieldState.Of(typeNow) : t, AxSchema.Beam);
+            // Curves that have no type yet are being tagged for the first time: write the shown defaults.
+            // Already-tagged curves only get what the user actually changes.
+            bool fresh = t.Kind == FieldStateKind.AbsentAll;
+            type.Load(t.Kind == FieldStateKind.Same ? FieldState.Of(typeNow) : t, AxSchema.Beam, fresh);
 
-            material.Load(State.Get(AxKeys.Material), Lookup(DefaultMaterial, typeNow));
-            section.Load(State.Get(AxKeys.Section), Lookup(DefaultSection, typeNow));
-            release.Load(State.Get(AxKeys.Release), typeNow == AxSchema.Truss ? "" : "fix");
-            localAxis.Load(State.Get(AxKeys.LocalAxis), "");
-            eccentricity.Load(State.Get(AxKeys.Eccentricity), "");
-            stiffness.Load(State.Get(AxKeys.Stiffness), typeNow == AxSchema.Spring || typeNow == AxSchema.EdgeHinge ? DefaultStiffness : "");
-            coupled.Load(State.Get(AxKeys.CoupledDof), typeNow == AxSchema.NodeLink ? DefaultCoupled : "");
-            hingeDomains.Load(State.Get(AxKeys.HingeDomains), "");
-            support.Load(State.Get(AxKeys.Support), "");
-            parts.Load(State.Get(AxKeys.Parts), "");
+            material.Load(State.Get(AxKeys.Material), Lookup(DefaultMaterial, typeNow), fresh);
+            section.Load(State.Get(AxKeys.Section), Lookup(DefaultSection, typeNow), fresh);
+            release.Load(State.Get(AxKeys.Release), typeNow == AxSchema.Truss ? "" : "fix", fresh);
+            localAxis.Load(State.Get(AxKeys.LocalAxis), "", fresh);
+            eccentricity.Load(State.Get(AxKeys.Eccentricity), "", fresh);
+            stiffness.Load(State.Get(AxKeys.Stiffness), typeNow == AxSchema.Spring || typeNow == AxSchema.EdgeHinge ? DefaultStiffness : "", fresh);
+            coupled.Load(State.Get(AxKeys.CoupledDof), typeNow == AxSchema.NodeLink ? DefaultCoupled : "", fresh);
+            hingeDomains.Load(State.Get(AxKeys.HingeDomains), "", fresh);
+            support.Load(State.Get(AxKeys.Support), "", fresh);
+            parts.Load(State.Get(AxKeys.Parts), "", fresh);
         }
 
         private static string Lookup(Dictionary<string, string> d, string key)
@@ -163,10 +166,16 @@ namespace AxisBridge.UI
             SwapDefault(material, DefaultMaterial, t);
             SwapDefault(section, DefaultSection, t);
 
-            if ((t == AxSchema.Spring || t == AxSchema.EdgeHinge) && stiffness.Value.Length == 0 && !stiffness.ShowsVaries)
-                stiffness.Assign(DefaultStiffness);
-            if (t == AxSchema.NodeLink && coupled.Value.Length == 0 && !coupled.ShowsVaries)
-                coupled.Assign(DefaultCoupled);
+            if ((t == AxSchema.Spring || t == AxSchema.EdgeHinge) && !stiffness.ShowsVaries && (stiffness.Value.Length == 0 || !stiffness.Touched))
+                stiffness.Assign(stiffness.Value.Length == 0 ? DefaultStiffness : stiffness.Value);
+            if (t == AxSchema.NodeLink && !coupled.ShowsVaries && (coupled.Value.Length == 0 || !coupled.Touched))
+                coupled.Assign(coupled.Value.Length == 0 ? DefaultCoupled : coupled.Value);
+            // Profile fields become relevant after a type change: make sure their shown values get written.
+            if (t == AxSchema.Beam || t == AxSchema.Rib || t == AxSchema.Truss)
+            {
+                if (!material.ShowsVaries && !material.Touched && material.Value.Length > 0) material.Assign(material.Value);
+                if (!section.ShowsVaries && !section.Touched && section.Value.Length > 0) section.Assign(section.Value);
+            }
             if (t == AxSchema.Truss && !release.ShowsVaries) release.Assign("");
         }
 
@@ -211,9 +220,9 @@ namespace AxisBridge.UI
         protected override string ValidateInput()
         {
             string t = CurrentType;
-            if (t == AxSchema.Spring && stiffness.Touched && CountNumbers(stiffness.Value) != 6)
+            if ((t == AxSchema.Spring || t == AxSchema.EdgeHinge) && stiffness.Touched && stiffness.Value != "-" && CountNumbers(stiffness.Value) != 6)
                 return "Stiffness needs 6 comma-separated numbers (kx, ky, kz, kxx, kyy, kzz).";
-            if (t == AxSchema.NodeLink && coupled.Touched && CountNumbers(coupled.Value) != 6)
+            if (t == AxSchema.NodeLink && coupled.Touched && coupled.Value != "-" && CountNumbers(coupled.Value) != 6)
                 return "Coupled DOFs needs 6 comma-separated flags (1 or 0).";
             return null;
         }

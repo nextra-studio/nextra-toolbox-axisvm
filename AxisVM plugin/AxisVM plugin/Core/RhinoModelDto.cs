@@ -44,13 +44,19 @@ namespace AxisVM_plugin.Core
         public const string SpanDirection = "Ax_SpanDirection";
         public const string EdgeSpacing = "Ax_EdgeSpacing";
 
+        /// <summary>One-way load panel: degrees off 90 deg (to the span) that a receiving edge or member may be ("" = 5).</summary>
+        public const string SpanTolerance = "Ax_SpanTolerance";
+
+        /// <summary>Two-way load panel: ids of the Rhino curves / points that alone receive its load ("" = automatic).</summary>
+        public const string LoadTargets = "Ax_LoadTargets";
+
         /// <summary>Every key this version understands, used to warn about typos in the Rhino attributes.</summary>
         public static readonly HashSet<string> Known = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             Guid, Parts,
             Support, NodalLoad,
             Type, Material, Section, Release, LocalAxis, Eccentricity, PointLoad, DistLoad, Stiffness, HingeDomains, CoupledDof,
-            FeType, Thickness, SpanDirection, EdgeSpacing
+            FeType, Thickness, SpanDirection, EdgeSpacing, SpanTolerance, LoadTargets
         };
 
         /// <summary>

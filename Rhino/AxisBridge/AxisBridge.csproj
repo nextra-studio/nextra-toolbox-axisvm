@@ -81,6 +81,13 @@
     </Compile>
     <Compile Include="Commands\AttrCommandRunner.cs" />
     <Compile Include="Commands\AxLibraryCommand.cs" />
+    <Compile Include="Commands\AxEdgeHingeCommand.cs" />
+    <Compile Include="Loads\SpanTools.cs" />
+    <Compile Include="UI\PanelFields.cs" />
+    <Compile Include="UI\PanelPreview.cs" />
+    <Compile Include="UI\EdgeHingeForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Layers\AxLayers.cs" />
     <Compile Include="Export\ExportDto.cs" />
     <Compile Include="Export\GeometryFlattener.cs" />

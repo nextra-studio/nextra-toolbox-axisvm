@@ -759,8 +759,12 @@ namespace AxisVM_plugin.Core
         /// <summary>
         /// Reads Ax_SpanDirection of a one-way load panel. Returns true with an explicit angle in the
         /// global XY plane [deg] for "x", "y" or a vector; false with <paramref name="legacyDir"/> = 0
-        /// (auto, shorter span), 1 or 2 (the older "along / across the first edge" values).
+        /// (auto, shorter span), <see cref="AutoLongerSpan"/> ("autolong": auto, longer span), or 1 / 2
+        /// (the older "along / across the first edge" values).
         /// </summary>
+        /// <summary><see cref="TryParseSpanAngle"/> result for "autolong": the shorter span turned 90 deg.</summary>
+        public const int AutoLongerSpan = 3;
+
         public static bool TryParseSpanAngle(string value, out double angleDeg, out int legacyDir, out string err)
         {
             angleDeg = 0;
@@ -772,6 +776,7 @@ namespace AxisVM_plugin.Core
             switch (k)
             {
                 case "0": case "auto": case "short": return false;
+                case "autolong": case "auto long": case "auto-long": case "longer": legacyDir = AutoLongerSpan; return false;
                 case "1": case "dir1": case "long": legacyDir = 1; return false;
                 case "2": case "dir2": legacyDir = 2; return false;
                 case "x": angleDeg = 0; return true;

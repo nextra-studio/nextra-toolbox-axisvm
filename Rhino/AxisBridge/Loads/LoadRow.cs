@@ -40,6 +40,8 @@ namespace AxisBridge.Loads
 
         public double Pos = 0.5;
         public double From = 0.0;
+
+        /// <summary>End of a member distributed load. NaN = "to the end of the member" (length mode).</summary>
         public double To = 1.0;
 
         /// <summary>Forces/moments (point loads) or start intensities (distributed loads). Always 6 slots.</summary>
@@ -83,10 +85,10 @@ namespace AxisBridge.Loads
                 case LoadKind.MemberDist:
                     sb.Append("; sys=").Append(System);
                     sb.Append("; from=").Append(PosText(From));
-                    sb.Append("; to=").Append(PosText(To));
-                    sb.Append("; q1=").Append(Nums(V, 3)).Append(",0,0,0");
-                    if (V2 != null && !SameFirst3(V, V2))
-                        sb.Append("; q2=").Append(Nums(V2, 3)).Append(",0,0,0");
+                    if (!double.IsNaN(To)) sb.Append("; to=").Append(PosText(To));
+                    sb.Append("; q1=").Append(Nums(V, 6));
+                    if (V2 != null && !Same(V, V2))
+                        sb.Append("; q2=").Append(Nums(V2, 6));
                     break;
 
                 case LoadKind.SurfaceArea:
@@ -97,7 +99,7 @@ namespace AxisBridge.Loads
                 case LoadKind.SurfacePoint:
                     sb.Append("; sys=").Append(System);
                     sb.Append("; at=").Append(N(X)).Append(',').Append(N(Y)).Append(',').Append(N(Z));
-                    sb.Append("; F=").Append(Nums(V, 3)).Append(",0,0,0");
+                    sb.Append("; F=").Append(Nums(V, 6));
                     break;
             }
             return sb.ToString();
@@ -113,7 +115,7 @@ namespace AxisBridge.Loads
             var parts = new List<string>();
             for (int i = 0; i < 6; i++)
                 if (Math.Abs(V[i]) > 1e-12) parts.Add(names[i] + "=" + N(V[i]));
-            if (V2 != null && !SameFirst3(V, V2))
+            if (V2 != null && !Same(V, V2))
                 parts.Add("->" + N(V2[2]));
             return Case + ": " + (parts.Count == 0 ? "0" : string.Join(" ", parts.ToArray()));
         }
@@ -130,9 +132,9 @@ namespace AxisBridge.Loads
             return s.Trim().Replace(";", " ").Replace("=", " ");
         }
 
-        private static bool SameFirst3(double[] a, double[] b)
+        public static bool Same(double[] a, double[] b)
         {
-            for (int i = 0; i < 3; i++) if (Math.Abs(a[i] - b[i]) > 1e-12) return false;
+            for (int i = 0; i < 6; i++) if (Math.Abs(a[i] - b[i]) > 1e-12) return false;
             return true;
         }
 
@@ -179,10 +181,12 @@ namespace AxisBridge.Loads
                         row.V2 = new double[6];
                         ParseInto(v, row.V2);
                     }
-                    bool byLenFrom = false, byLenTo = false;
+                    bool byLenFrom = false, byLenTo = false, hasTo = false;
                     if (TryField(f, out v, "from", "start")) row.From = ParsePos(v, out byLenFrom); else row.From = 0;
-                    if (TryField(f, out v, "to", "end")) row.To = ParsePos(v, out byLenTo); else row.To = 1;
+                    if (TryField(f, out v, "to", "end")) { row.To = ParsePos(v, out byLenTo); hasTo = true; }
                     row.ByLength = byLenFrom || byLenTo;
+                    // No "to": the load runs to the member end - kept open in length mode (same as the importer).
+                    if (!hasTo) row.To = row.ByLength ? double.NaN : 1.0;
                     return true;
 
                 case LoadKind.SurfaceArea:

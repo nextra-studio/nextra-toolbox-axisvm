@@ -11,7 +11,7 @@ namespace AxisVM_plugin.Functions
     /// </summary>
     internal struct OneWayPanelOptions
     {
-        public int SpanningDirection;    // 0 = Auto (short), 1 = Dir 1, 2 = Dir 2
+        public int SpanningDirection;    // 0 = Auto (shorter span), 1 = Dir 1, 2 = Dir 2, 3 = Auto (longer span)
         public bool NoSpacing;           // true = a single panel over the whole boundary
         public double EdgeSpacingMm;     // edge-strip tributary width [mm] (ignored when NoSpacing)
         public double AngleToleranceDeg; // chaining / classification tolerance [deg]
@@ -42,7 +42,7 @@ namespace AxisVM_plugin.Functions
             if (!NoSpacing && (!IsFinite(EdgeSpacingMm) || EdgeSpacingMm <= 0.001))
                 return "Edge spacing must be finite and greater than 0.001 mm.";
             if (UseSpanAngle && !IsFinite(SpanAngleDeg)) return "Span angle must be finite.";
-            if (!UseSpanAngle && (SpanningDirection < 0 || SpanningDirection > 2))
+            if (!UseSpanAngle && (SpanningDirection < 0 || SpanningDirection > 3))
                 return "Unknown spanning direction.";
             return null;
         }
@@ -128,7 +128,7 @@ namespace AxisVM_plugin.Functions
             {
                 return dir1Angle + 90.0;
             }
-            else // Auto (Short)
+            else // Auto: shorter span (0), or longer span (3) = the shorter one turned 90 deg
             {
                 double dir2Length = dir1Length;
                 for (int i = 1; i < edges.Count; i++)
@@ -139,7 +139,8 @@ namespace AxisVM_plugin.Functions
                         break;
                     }
                 }
-                return (dir1Length <= dir2Length) ? dir1Angle : dir1Angle + 90.0;
+                double shortSpan = (dir1Length <= dir2Length) ? dir1Angle : dir1Angle + 90.0;
+                return opt.SpanningDirection == 3 ? shortSpan + 90.0 : shortSpan;
             }
         }
 
@@ -164,9 +165,23 @@ namespace AxisVM_plugin.Functions
         // Panel creation
         // ==================================================================
 
-        private static int CreatePanelFromLines(IAxisVMModel model, List<int> lineIds, HashSet<int> supportLineIds)
+        /// <summary>
+        /// Creates one load panel over <paramref name="lineIds"/> that sends its load to the boundary
+        /// lines in <paramref name="supportLineIds"/> and to every member inside it that runs across the
+        /// load direction <paramref name="loadAngleDeg"/> (90 deg within <paramref name="toleranceDeg"/>),
+        /// e.g. an intermediate beam parallel to the supports. AxisVM shares the load between all of
+        /// them by tributary width, and only loads the part of a member that lies inside the panel.
+        /// The interior members found are added to <paramref name="interiorFound"/>.
+        /// </summary>
+        private static int CreatePanelFromLines(IAxisVMModel model, List<int> lineIds, HashSet<int> supportLineIds,
+            double loadAngleDeg, double toleranceDeg, HashSet<int> interiorFound)
         {
             if (lineIds.Count < 3 || supportLineIds.Count == 0) return 0;
+
+            List<int> interior = FindInteriorReceivers(model, lineIds, loadAngleDeg, toleranceDeg);
+            List<int> receivers = new List<int>(supportLineIds);
+            receivers.AddRange(interior);
+
             Array idsArray = Array.CreateInstance(typeof(int), new int[] { lineIds.Count }, new int[] { 1 });
             for (int i = 0; i < lineIds.Count; i++) idsArray.SetValue(lineIds[i], i + 1);
 
@@ -180,16 +195,16 @@ namespace AxisVM_plugin.Functions
                     lp.Auto = (ELongBoolean)0;
 
                     // SetLines takes a plain array of line IDs (same 1-based convention as
-                    // AddFromLineIDs, no count prefix) and tells the panel which of its boundary
-                    // lines actually receive the distributed load - this is the one-way behavior:
-                    // only the support edges get load, the edge beams get none.
+                    // AddFromLineIDs, no count prefix) and tells the panel which lines actually
+                    // receive the distributed load - this is the one-way behavior: the support edges
+                    // and interior members across the load direction get load, the edge beams none.
                     if (supportLineIds.Count > 0)
                     {
-                        Array supportArray = Array.CreateInstance(typeof(int), new int[] { supportLineIds.Count }, new int[] { 1 });
+                        Array supportArray = Array.CreateInstance(typeof(int), new int[] { receivers.Count }, new int[] { 1 });
                         int idx = 1;
-                        foreach (int id in supportLineIds) supportArray.SetValue(id, idx++);
+                        foreach (int id in receivers) supportArray.SetValue(id, idx++);
                         int result = lp.SetLines(ref supportArray);
-                        if (result != supportLineIds.Count)
+                        if (result != receivers.Count)
                             throw new InvalidOperationException("AxisVM rejected the receiving lines (code " + result + ").");
 
                         // AxisVM's own one-way distribution algorithm reads per-edge "SelectedEdge"
@@ -218,7 +233,128 @@ namespace AxisVM_plugin.Functions
                     throw new InvalidOperationException("Could not remove a panel after failed one-way configuration.");
                 throw;
             }
+            if (interiorFound != null) interiorFound.UnionWith(interior);
             return panelId;
+        }
+
+        // ==================================================================
+        // Interior receivers
+        // ==================================================================
+
+        private const double GeomTol = 1e-3; // [m]
+
+        /// <summary>
+        /// Beams, ribs and trusses (not on the contour) that lie in the panel's plane, run across the
+        /// load direction within the tolerance, and pass through the inside of the contour.
+        /// </summary>
+        private static List<int> FindInteriorReceivers(IAxisVMModel model, List<int> contourIds, double loadAngleDeg, double toleranceDeg)
+        {
+            List<int> found = new List<int>();
+            List<RNode> loop = ContourLoop(model, contourIds);
+            if (loop == null) return found;
+
+            double z = loop[0].z;
+            double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+            foreach (RNode p in loop)
+            {
+                minX = Math.Min(minX, p.x); maxX = Math.Max(maxX, p.x);
+                minY = Math.Min(minY, p.y); maxY = Math.Max(maxY, p.y);
+            }
+
+            HashSet<int> contour = new HashSet<int>(contourIds);
+            int count = model.Lines.Count;
+            for (int i = 1; i <= count; i++)
+            {
+                if (contour.Contains(i)) continue;
+                var line = model.Lines.Item[i];
+                ELineType type = line.LineType;
+                if (type != ELineType.ltBeam && type != ELineType.ltRib && type != ELineType.ltTruss) continue;
+                if (line.GeomType != ELineGeomType.lgtStraightLine) continue;
+
+                RNode a = GetNode(model, line.StartNode), b = GetNode(model, line.EndNode);
+                if (Math.Abs(a.z - z) > GeomTol || Math.Abs(b.z - z) > GeomTol) continue;
+                if (Math.Max(a.x, b.x) < minX - GeomTol || Math.Min(a.x, b.x) > maxX + GeomTol ||
+                    Math.Max(a.y, b.y) < minY - GeomTol || Math.Min(a.y, b.y) > maxY + GeomTol) continue;
+                if (!IsAnglePerpendicular(EdgeChainBuilder.ChordAngleDeg(a, b), loadAngleDeg, toleranceDeg)) continue;
+
+                if (PassesThroughInside(loop, a, b)) found.Add(i);
+            }
+            return found;
+        }
+
+        /// <summary>The contour as an ordered loop of corner nodes, or null if it is not one closed loop.</summary>
+        private static List<RNode> ContourLoop(IAxisVMModel model, List<int> contourIds)
+        {
+            List<ResolvedLine> segs = new List<ResolvedLine>();
+            foreach (int id in contourIds) segs.Add(ResolveLine(model, id));
+
+            List<RNode> loop = new List<RNode>();
+            HashSet<int> used = new HashSet<int>();
+            int start = segs[0].NodeId1, current = start;
+            while (used.Count < segs.Count)
+            {
+                int pick = -1;
+                for (int k = 0; k < segs.Count; k++)
+                {
+                    if (!used.Contains(k) && (segs[k].NodeId1 == current || segs[k].NodeId2 == current)) { pick = k; break; }
+                }
+                if (pick < 0) return null;
+                used.Add(pick);
+                loop.Add(GetNode(model, current));
+                current = segs[pick].NodeId1 == current ? segs[pick].NodeId2 : segs[pick].NodeId1;
+            }
+            return current == start && loop.Count >= 3 ? loop : null;
+        }
+
+        /// <summary>
+        /// True when some stretch of segment a-b lies strictly inside the polygon (XY). The segment is
+        /// cut where it crosses the contour and the middle of each piece is tested, so a member that
+        /// only touches or runs along the contour does not count.
+        /// </summary>
+        private static bool PassesThroughInside(List<RNode> loop, RNode a, RNode b)
+        {
+            List<double> cuts = new List<double> { 0.0, 1.0 };
+            double dx = b.x - a.x, dy = b.y - a.y;
+            for (int i = 0; i < loop.Count; i++)
+            {
+                RNode p = loop[i], q = loop[(i + 1) % loop.Count];
+                double ex = q.x - p.x, ey = q.y - p.y;
+                double den = dx * ey - dy * ex;
+                if (Math.Abs(den) < 1e-12) continue; // parallel
+                double t = ((p.x - a.x) * ey - (p.y - a.y) * ex) / den;
+                double u = ((p.x - a.x) * dy - (p.y - a.y) * dx) / den;
+                if (t > 0.0 && t < 1.0 && u >= 0.0 && u <= 1.0) cuts.Add(t);
+            }
+            cuts.Sort();
+
+            for (int k = 0; k + 1 < cuts.Count; k++)
+            {
+                if ((cuts[k + 1] - cuts[k]) * Math.Sqrt(dx * dx + dy * dy) < GeomTol) continue;
+                double tm = 0.5 * (cuts[k] + cuts[k + 1]);
+                if (StrictlyInside(loop, a.x + dx * tm, a.y + dy * tm)) return true;
+            }
+            return false;
+        }
+
+        private static bool StrictlyInside(List<RNode> loop, double x, double y)
+        {
+            bool inside = false;
+            for (int i = 0, j = loop.Count - 1; i < loop.Count; j = i++)
+            {
+                RNode p = loop[i], q = loop[j];
+                if (DistanceToSegment(x, y, p, q) < GeomTol) return false; // on the contour
+                if ((p.y > y) != (q.y > y) && x < (q.x - p.x) * (y - p.y) / (q.y - p.y) + p.x) inside = !inside;
+            }
+            return inside;
+        }
+
+        private static double DistanceToSegment(double x, double y, RNode p, RNode q)
+        {
+            double ex = q.x - p.x, ey = q.y - p.y;
+            double len2 = ex * ex + ey * ey;
+            double t = len2 > 0 ? Math.Max(0.0, Math.Min(1.0, ((x - p.x) * ex + (y - p.y) * ey) / len2)) : 0.0;
+            double cx = p.x + ex * t - x, cy = p.y + ey * t - y;
+            return Math.Sqrt(cx * cx + cy * cy);
         }
 
         // ==================================================================
@@ -286,6 +422,7 @@ namespace AxisVM_plugin.Functions
             }
 
             double spanAngle = ComputeSpanAngle(edges, opt);
+            HashSet<int> interior = new HashSet<int>();
 
             // ---- With-spacing path: two edge strips + one centre panel -------------------------
             if (!opt.NoSpacing)
@@ -296,7 +433,7 @@ namespace AxisVM_plugin.Functions
                 bool spaced;
                 try
                 {
-                    spaced = TryCreateSpacedPanels(model, edges, spanAngle, opt.AngleToleranceDeg, spacingM, out spacedUids, out failureReason);
+                    spaced = TryCreateSpacedPanels(model, edges, spanAngle, opt.AngleToleranceDeg, spacingM, interior, out spacedUids, out failureReason);
                 }
                 finally
                 {
@@ -309,6 +446,7 @@ namespace AxisVM_plugin.Functions
                 }
                 if (spaced)
                 {
+                    NoteInterior(notes, label, interior);
                     return spacedUids; // two edge strips + one centre panel
                 }
 
@@ -330,16 +468,24 @@ namespace AxisVM_plugin.Functions
                 return created;
             }
 
-            int panelId = CreatePanelFromLines(model, allIds, supportIds);
+            interior.Clear(); // a failed spaced attempt may have recorded some
+            int panelId = CreatePanelFromLines(model, allIds, supportIds, spanAngle, opt.AngleToleranceDeg, interior);
             if (panelId > 0)
             {
                 created.Add(model.LoadPanels.get_UID(panelId));
+                NoteInterior(notes, label, interior);
                 return created;
             }
 
-            notes.Add(string.Format("Boundary {0}: AxisVM rejected the contour ({1} segment(s)). Check that the lines form a closed loop.",
-                label, segments.Count));
+            notes.Add(string.Format("Boundary {0}: AxisVM rejected the contour ({1} segment(s), code {2}). Check that the lines form a closed loop.",
+                label, segments.Count, panelId));
             return created;
+        }
+
+        private static void NoteInterior(List<string> notes, int label, HashSet<int> interior)
+        {
+            if (interior.Count > 0)
+                notes.Add(string.Format("Boundary {0}: {1} intermediate member(s) inside the panel across the span also receive load.", label, interior.Count));
         }
 
         /// <summary>Resolves every segment UID of the given edges to a current line index.</summary>
@@ -374,7 +520,7 @@ namespace AxisVM_plugin.Functions
         /// caller then falls back to a single panel.
         /// </summary>
         private static bool TryCreateSpacedPanels(IAxisVMModel model, List<LogicalEdge> edges, double spanAngle,
-                                                  double angleTolerance, double spacingM,
+                                                  double angleTolerance, double spacingM, HashSet<int> interiorFound,
                                                   out List<int> createdPanelUids, out string failureReason)
         {
             createdPanelUids = new List<int>();
@@ -383,7 +529,7 @@ namespace AxisVM_plugin.Functions
             try
             {
                 success = TryCreateSpacedPanelsCore(model, edges, spanAngle, angleTolerance, spacingM,
-                    createdPanelUids, insetLineUids, out failureReason);
+                    createdPanelUids, insetLineUids, interiorFound, out failureReason);
                 return success;
             }
             finally
@@ -405,7 +551,7 @@ namespace AxisVM_plugin.Functions
 
         private static bool TryCreateSpacedPanelsCore(IAxisVMModel model, List<LogicalEdge> edges, double spanAngle,
             double angleTolerance, double spacingM, List<int> createdPanelUids, List<int> insetLineUids,
-            out string failureReason)
+            HashSet<int> interiorFound, out string failureReason)
         {
             failureReason = null;
 
@@ -529,7 +675,8 @@ namespace AxisVM_plugin.Functions
                 contour.Add(insetIdx);
 
                 HashSet<int> support = new HashSet<int>(beamSegs);
-                int stripId = CreatePanelFromLines(model, contour, support);
+                // A strip carries its load across to the edge beam, i.e. at 90 deg to the main span.
+                int stripId = CreatePanelFromLines(model, contour, support, spanAngle + 90.0, angleTolerance, interiorFound);
                 if (stripId <= 0)
                 {
                     failureReason = "AxisVM rejected an edge strip contour.";
@@ -561,7 +708,7 @@ namespace AxisVM_plugin.Functions
                 foreach (int id in mids) centreSupport.Add(id);
             }
 
-            int centreId = CreatePanelFromLines(model, centre, centreSupport);
+            int centreId = CreatePanelFromLines(model, centre, centreSupport, spanAngle, angleTolerance, interiorFound);
             if (centreId <= 0)
             {
                 failureReason = "AxisVM rejected the centre panel contour.";

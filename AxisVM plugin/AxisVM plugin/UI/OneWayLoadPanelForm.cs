@@ -1,183 +1,394 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.Windows.Forms;
 using AxisVM_plugin.Functions;
 
 namespace AxisVM_plugin.UI
 {
+    /// <summary>
+    /// Settings for "N. One-Way Load Panel". The top line says what the run will do with the current
+    /// selection (convert panels, or create panels from lines); the preview redraws with every change
+    /// so the receiving members and edge strips can be checked before anything is built. Settings are
+    /// remembered for the rest of the AxisVM session.
+    /// </summary>
     public class OneWayLoadPanelForm : Form
     {
-        public int SpanningDirection { get; private set; } // 0=Auto, 1=Dir1, 2=Dir2
-        public bool NoSpacing { get; private set; }
-        public double EdgeSpacing { get; private set; }
-        public double AngleTolerance { get; private set; }
+        // Span direction choices.
+        private const int DirAuto = 0, DirX = 1, DirY = 2, DirAngle = 3, DirAutoLong = 4;
 
-        private RadioButton radAuto;
-        private RadioButton radDir1;
-        private RadioButton radDir2;
-        private CheckBox chkNoSpacing;
-        private TextBox txtEdgeSpacing;
-        private Label lblEdgeSpacing;
-        private TextBox txtAngleTolerance;
-        private Label lblAngleTolerance;
-        private Button btnOk;
-        private Button btnCancel;
+        // Remembered between runs (per AxisVM session).
+        private static int lastDir = DirAuto;
+        private static string lastAngle = "0";
+        private static bool lastStrips = true;
+        private static string lastStripWidth = "300";
+        private static string lastTolerance = "15";
+        private static bool lastApplyLoad;
+        private static int lastLoadCase;
+        private static string lastLoad = "1.5";
+
+        private static readonly Color Accent = Color.FromArgb(0, 102, 180);
+        private static readonly Color StripColour = Color.FromArgb(230, 126, 34);
+
+        internal OneWayPanelOptions Options { get; private set; }
+        public bool ApplyLoad { get; private set; }
+        public int LoadCaseId { get; private set; }   // 1-based AxisVM load case index
+        public double LoadValue { get; private set; } // kN/m2, positive downward
+
+        private readonly bool convert;
+        private RadioButton radAuto, radAutoLong, radX, radY, radAngle;
+        private TextBox txtAngle, txtStripWidth, txtTolerance, txtLoad;
+        private CheckBox chkStrips, chkLoad;
+        private ComboBox cboLoadCase;
         private PictureBox picPreview;
 
-        public OneWayLoadPanelForm()
+        public OneWayLoadPanelForm(bool convertPanels, string selectionText, List<string> loadCases)
         {
-            InitializeComponent();
+            convert = convertPanels;
+            InitializeComponent(selectionText, loadCases);
+            RestoreSettings(loadCases.Count);
+            UpdateEnabled();
         }
 
-        private void InitializeComponent()
+        private void InitializeComponent(string selectionText, List<string> loadCases)
         {
-            this.Text = "One-Way Load Panel";
-            this.Size = new Size(320, 420);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
+            Text = "One-Way Load Panel";
+            ClientSize = new Size(470, 640);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterParent;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
 
-            // Direction Group
-            GroupBox grpDirection = new GroupBox();
-            grpDirection.Text = "Spanning Direction";
-            grpDirection.Location = new Point(15, 15);
-            grpDirection.Size = new Size(270, 60);
-            this.Controls.Add(grpDirection);
+            // ---- header: what will happen -----------------------------------
+            Panel header = new Panel { Location = new Point(0, 0), Size = new Size(470, 64), BackColor = Accent };
+            header.Controls.Add(new Label
+            {
+                Text = convert ? "Convert load panels to one-way" : "Create one-way load panels",
+                Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
+                ForeColor = Color.White,
+                Location = new Point(14, 8),
+                AutoSize = true
+            });
+            header.Controls.Add(new Label
+            {
+                Text = selectionText,
+                ForeColor = Color.White,
+                Location = new Point(14, 32),
+                Size = new Size(445, 30)
+            });
+            Controls.Add(header);
 
-            radAuto = new RadioButton { Text = "Auto (Short)", Location = new Point(15, 25), AutoSize = true, Checked = true };
-            radDir1 = new RadioButton { Text = "Dir 1", Location = new Point(110, 25), AutoSize = true };
-            radDir2 = new RadioButton { Text = "Dir 2", Location = new Point(180, 25), AutoSize = true };
-            grpDirection.Controls.Add(radAuto);
-            grpDirection.Controls.Add(radDir1);
-            grpDirection.Controls.Add(radDir2);
+            // ---- span direction --------------------------------------------
+            GroupBox grpSpan = new GroupBox { Text = "Span direction (the slab spans this way)", Location = new Point(12, 74), Size = new Size(446, 82) };
+            // Auto follows each panel's own edges (not global X/Y), so it also suits rotated bays.
+            radAuto = new RadioButton { Text = "Auto - shorter span", Location = new Point(12, 22), AutoSize = true };
+            radAutoLong = new RadioButton { Text = "Auto - longer span", Location = new Point(170, 22), AutoSize = true };
+            radX = new RadioButton { Text = "Global X", Location = new Point(12, 50), AutoSize = true };
+            radY = new RadioButton { Text = "Global Y", Location = new Point(100, 50), AutoSize = true };
+            radAngle = new RadioButton { Text = "Angle [deg]", Location = new Point(190, 50), AutoSize = true };
+            txtAngle = new TextBox { Location = new Point(285, 48), Size = new Size(60, 23) };
+            grpSpan.Controls.AddRange(new Control[] { radAuto, radAutoLong, radX, radY, radAngle, txtAngle });
+            foreach (RadioButton r in new[] { radAuto, radAutoLong, radX, radY, radAngle }) r.CheckedChanged += OnChanged;
+            txtAngle.TextChanged += OnChanged;
+            Controls.Add(grpSpan);
 
-            // Spacing
-            chkNoSpacing = new CheckBox();
-            chkNoSpacing.Text = "No Spacing (Single Panel)";
-            chkNoSpacing.Location = new Point(20, 90);
-            chkNoSpacing.AutoSize = true;
-            chkNoSpacing.CheckedChanged += ChkNoSpacing_CheckedChanged;
-            this.Controls.Add(chkNoSpacing);
+            // ---- edge strips -------------------------------------------------
+            GroupBox grpStrips = new GroupBox { Text = "Edge strips", Location = new Point(12, 164), Size = new Size(446, 92) };
+            chkStrips = new CheckBox { Text = "Split off a strip along each edge beam", Location = new Point(12, 22), AutoSize = true };
+            Label lblWidth = new Label { Text = "Strip width = joist spacing [mm]", Location = new Point(30, 50), AutoSize = true };
+            txtStripWidth = new TextBox { Location = new Point(230, 47), Size = new Size(70, 23) };
+            Label lblStripHint = new Label
+            {
+                Text = "The strip loads the edge beam; the centre spans to the supports.",
+                ForeColor = SystemColors.GrayText,
+                Location = new Point(30, 70),
+                AutoSize = true
+            };
+            grpStrips.Controls.AddRange(new Control[] { chkStrips, lblWidth, txtStripWidth, lblStripHint });
+            chkStrips.CheckedChanged += OnChanged;
+            txtStripWidth.TextChanged += OnChanged;
+            Controls.Add(grpStrips);
 
-            lblEdgeSpacing = new Label();
-            lblEdgeSpacing.Text = "Edge Spacing (mm):";
-            lblEdgeSpacing.Location = new Point(20, 120);
-            lblEdgeSpacing.AutoSize = true;
-            this.Controls.Add(lblEdgeSpacing);
+            // ---- load ----------------------------------------------------------
+            GroupBox grpLoad = new GroupBox { Text = "Load", Location = new Point(12, 264), Size = new Size(446, 82) };
+            if (convert)
+            {
+                grpLoad.Controls.Add(new Label
+                {
+                    Text = "The loads on each panel (area, polygon and point loads) are moved\nonto its new one-way panels, same load case and intensity.",
+                    Location = new Point(12, 24),
+                    Size = new Size(420, 40)
+                });
+            }
+            else
+            {
+                chkLoad = new CheckBox { Text = "Apply an area load", Location = new Point(12, 22), AutoSize = true };
+                cboLoadCase = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(150, 20), Size = new Size(284, 23) };
+                foreach (string name in loadCases) cboLoadCase.Items.Add(name);
+                Label lblQ = new Label { Text = "q [kN/m2] (+ = downward)", Location = new Point(30, 52), AutoSize = true };
+                txtLoad = new TextBox { Location = new Point(190, 49), Size = new Size(70, 23) };
+                grpLoad.Controls.AddRange(new Control[] { chkLoad, cboLoadCase, lblQ, txtLoad });
+                chkLoad.CheckedChanged += OnChanged;
+                if (loadCases.Count == 0)
+                {
+                    chkLoad.Enabled = false;
+                    chkLoad.Text = "Apply an area load (no load case in the model)";
+                }
+            }
+            Controls.Add(grpLoad);
 
-            txtEdgeSpacing = new TextBox();
-            txtEdgeSpacing.Text = "300";
-            txtEdgeSpacing.Location = new Point(140, 117);
-            txtEdgeSpacing.Size = new Size(100, 20);
-            this.Controls.Add(txtEdgeSpacing);
-
-            // Angle Tolerance
-            lblAngleTolerance = new Label();
-            lblAngleTolerance.Text = "Angle Tol (deg):";
-            lblAngleTolerance.Location = new Point(20, 150);
-            lblAngleTolerance.AutoSize = true;
-            this.Controls.Add(lblAngleTolerance);
-
-            txtAngleTolerance = new TextBox();
-            txtAngleTolerance.Text = "15.0";
-            txtAngleTolerance.Location = new Point(140, 147);
-            txtAngleTolerance.Size = new Size(100, 20);
-            this.Controls.Add(txtAngleTolerance);
-
-            // Preview Box
-            picPreview = new PictureBox();
-            picPreview.Location = new Point(15, 185);
-            picPreview.Size = new Size(270, 100);
-            picPreview.BorderStyle = BorderStyle.FixedSingle;
+            // ---- preview -------------------------------------------------------
+            picPreview = new PictureBox
+            {
+                Location = new Point(12, 356),
+                Size = new Size(446, 200),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.White
+            };
             picPreview.Paint += PicPreview_Paint;
-            this.Controls.Add(picPreview);
+            Controls.Add(picPreview);
 
-            // Buttons
-            btnOk = new Button();
-            btnOk.Text = "Apply";
-            btnOk.DialogResult = DialogResult.OK;
-            btnOk.Location = new Point(15, 300);
-            btnOk.Size = new Size(130, 30);
+            // ---- advanced + buttons --------------------------------------------
+            Controls.Add(new Label { Text = "Angle tolerance [deg]", Location = new Point(12, 571), AutoSize = true });
+            txtTolerance = new TextBox { Location = new Point(150, 568), Size = new Size(50, 23) };
+            Controls.Add(txtTolerance);
+            Controls.Add(new Label
+            {
+                Text = "Edges and inner beams at 90 +/- this\nangle to the span take load.",
+                ForeColor = SystemColors.GrayText,
+                Location = new Point(206, 563),
+                AutoSize = true
+            });
+
+            Button btnOk = new Button { Text = convert ? "Convert" : "Create", Location = new Point(262, 600), Size = new Size(96, 30) };
+            Button btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(362, 600), Size = new Size(96, 30) };
             btnOk.Click += BtnOk_Click;
-            this.Controls.Add(btnOk);
-
-            btnCancel = new Button();
-            btnCancel.Text = "Cancel";
-            btnCancel.DialogResult = DialogResult.Cancel;
-            btnCancel.Location = new Point(155, 300);
-            btnCancel.Size = new Size(130, 30);
-            this.Controls.Add(btnCancel);
-
-            this.AcceptButton = btnOk;
-            this.CancelButton = btnCancel;
+            Controls.Add(btnOk);
+            Controls.Add(btnCancel);
+            AcceptButton = btnOk;
+            CancelButton = btnCancel;
         }
 
-        private void ChkNoSpacing_CheckedChanged(object sender, EventArgs e)
+        private void RestoreSettings(int loadCaseCount)
         {
-            txtEdgeSpacing.Enabled = !chkNoSpacing.Checked;
+            (lastDir == DirX ? radX : lastDir == DirY ? radY : lastDir == DirAngle ? radAngle : lastDir == DirAutoLong ? radAutoLong : radAuto).Checked = true;
+            txtAngle.Text = lastAngle;
+            chkStrips.Checked = lastStrips;
+            txtStripWidth.Text = lastStripWidth;
+            txtTolerance.Text = lastTolerance;
+            if (!convert)
+            {
+                chkLoad.Checked = lastApplyLoad && loadCaseCount > 0;
+                if (loadCaseCount > 0) cboLoadCase.SelectedIndex = Math.Min(lastLoadCase, loadCaseCount - 1);
+                txtLoad.Text = lastLoad;
+            }
+        }
+
+        private void OnChanged(object sender, EventArgs e)
+        {
+            UpdateEnabled();
             picPreview.Invalidate();
         }
+
+        private void UpdateEnabled()
+        {
+            txtAngle.Enabled = radAngle.Checked;
+            txtStripWidth.Enabled = chkStrips.Checked;
+            if (!convert)
+            {
+                cboLoadCase.Enabled = chkLoad.Checked;
+                txtLoad.Enabled = chkLoad.Checked;
+            }
+        }
+
+        private int Direction
+        {
+            get { return radX.Checked ? DirX : radY.Checked ? DirY : radAngle.Checked ? DirAngle : radAutoLong.Checked ? DirAutoLong : DirAuto; }
+        }
+
+        // ------------------------------------------------------------------
+        // Preview
+        // ------------------------------------------------------------------
 
         private void PicPreview_Paint(object sender, PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            using (Pen border = new Pen(Color.Black, 2))
-            using (Pen loadLine = new Pen(Color.Blue, 2))
-            using (Pen loadArrow = new Pen(Color.Red, 2))
-            using (var arrowCap = new System.Drawing.Drawing2D.AdjustableArrowCap(4, 4))
+            // A 2:1 bay, X to the right, Y up. Auto picks its shorter span (Y).
+            Rectangle bay = new Rectangle(70, 28, 300, 130);
+            double spanDeg = 90.0;
+            double angle;
+            if (Direction == DirX || Direction == DirAutoLong) spanDeg = 0.0;
+            else if (Direction == DirAngle && OneWayPanelOptions.TryParseNumber(txtAngle.Text, out angle)) spanDeg = angle;
+            double folded = ((spanDeg % 180.0) + 180.0) % 180.0;
+            bool spanAlongX = folded < 45.0 || folded > 135.0;
+
+            // Receiving supports are the sides across the span; the other two are edge beams.
+            Point tl = new Point(bay.Left, bay.Top), tr = new Point(bay.Right, bay.Top);
+            Point bl = new Point(bay.Left, bay.Bottom), br = new Point(bay.Right, bay.Bottom);
+            Point[][] supports = spanAlongX ? new[] { new[] { tl, bl }, new[] { tr, br } } : new[] { new[] { tl, tr }, new[] { bl, br } };
+            Point[][] beams = spanAlongX ? new[] { new[] { tl, tr }, new[] { bl, br } } : new[] { new[] { tl, bl }, new[] { tr, br } };
+
+            bool strips = chkStrips.Checked;
+            const int strip = 18;
+            if (strips)
             {
-                loadArrow.CustomEndCap = arrowCap;
-                loadArrow.CustomStartCap = arrowCap;
-
-                Rectangle rect = new Rectangle(30, 20, 210, 60);
-                g.DrawRectangle(border, rect);
-
-                if (!chkNoSpacing.Checked)
+                using (Brush fill = new SolidBrush(Color.FromArgb(60, StripColour)))
                 {
-                    g.DrawLine(loadLine, 60, 20, 60, 80);
-                    g.DrawLine(loadLine, 210, 20, 210, 80);
-                    // Center panel arrow
-                    g.DrawLine(loadArrow, 135, 30, 135, 70);
+                    if (spanAlongX)
+                    {
+                        g.FillRectangle(fill, bay.Left, bay.Top, bay.Width, strip);
+                        g.FillRectangle(fill, bay.Left, bay.Bottom - strip, bay.Width, strip);
+                    }
+                    else
+                    {
+                        g.FillRectangle(fill, bay.Left, bay.Top, strip, bay.Height);
+                        g.FillRectangle(fill, bay.Right - strip, bay.Top, strip, bay.Height);
+                    }
                 }
-                else
+                using (Pen inset = new Pen(Color.Gray, 1) { DashStyle = DashStyle.Dash })
                 {
-                    g.DrawLine(loadArrow, 135, 30, 135, 70);
+                    if (spanAlongX)
+                    {
+                        g.DrawLine(inset, bay.Left, bay.Top + strip, bay.Right, bay.Top + strip);
+                        g.DrawLine(inset, bay.Left, bay.Bottom - strip, bay.Right, bay.Bottom - strip);
+                    }
+                    else
+                    {
+                        g.DrawLine(inset, bay.Left + strip, bay.Top, bay.Left + strip, bay.Bottom);
+                        g.DrawLine(inset, bay.Right - strip, bay.Top, bay.Right - strip, bay.Bottom);
+                    }
                 }
+            }
+
+            using (Pen support = new Pen(Accent, 5))
+            using (Pen beam = new Pen(strips ? StripColour : Color.DarkGray, strips ? 5 : 2))
+            {
+                foreach (Point[] s in beams) g.DrawLine(beam, s[0], s[1]);
+                foreach (Point[] s in supports) g.DrawLine(support, s[0], s[1]);
+            }
+
+            // Span arrows in the centre region.
+            double rad = spanDeg * Math.PI / 180.0;
+            float ux = (float)Math.Cos(rad), uy = -(float)Math.Sin(rad);
+            using (Pen arrow = new Pen(Color.Firebrick, 2))
+            using (AdjustableArrowCap cap = new AdjustableArrowCap(4, 4))
+            {
+                arrow.CustomStartCap = cap;
+                arrow.CustomEndCap = cap;
+                float cx = bay.Left + bay.Width / 2f, cy = bay.Top + bay.Height / 2f;
+                float half = spanAlongX ? 70f : 38f;
+                float px = -uy, py = ux; // across the span
+                for (int k = -1; k <= 1; k++)
+                {
+                    float ox = cx + px * 32f * k, oy = cy + py * 32f * k;
+                    g.DrawLine(arrow, ox - ux * half, oy - uy * half, ox + ux * half, oy + uy * half);
+                }
+            }
+
+            // Global axes and legend.
+            using (Pen axis = new Pen(Color.DimGray, 1))
+            using (AdjustableArrowCap cap = new AdjustableArrowCap(3, 3))
+            {
+                axis.CustomEndCap = cap;
+                g.DrawLine(axis, 18, 178, 44, 178);
+                g.DrawLine(axis, 18, 178, 18, 152);
+            }
+            using (Brush text = new SolidBrush(Color.DimGray))
+            {
+                g.DrawString("X", Font, text, 46, 170);
+                g.DrawString("Y", Font, text, 12, 136);
+                DrawLegend(g, strips);
+                if (Direction == DirAuto) g.DrawString("auto: shorter span", Font, text, 300, 4);
+                if (Direction == DirAutoLong) g.DrawString("auto: longer span", Font, text, 300, 4);
             }
         }
 
+        private void DrawLegend(Graphics g, bool strips)
+        {
+            int x = 80, y = 172;
+            using (Brush b = new SolidBrush(Accent)) g.FillRectangle(b, x, y + 5, 16, 5);
+            g.DrawString("receiving support", Font, Brushes.DimGray, x + 20, y);
+            x += 140;
+            if (strips)
+            {
+                using (Brush b = new SolidBrush(StripColour)) g.FillRectangle(b, x, y + 5, 16, 5);
+                g.DrawString("edge strip -> edge beam", Font, Brushes.DimGray, x + 20, y);
+                x += 170;
+            }
+            using (Pen p = new Pen(Color.Firebrick, 2)) g.DrawLine(p, x, y + 8, x + 16, y + 8);
+            g.DrawString("span", Font, Brushes.DimGray, x + 20, y);
+        }
+
+        // ------------------------------------------------------------------
+        // OK
+        // ------------------------------------------------------------------
+
         private void BtnOk_Click(object sender, EventArgs e)
         {
-            SpanningDirection = radAuto.Checked ? 0 : (radDir1.Checked ? 1 : 2);
-            NoSpacing = chkNoSpacing.Checked;
+            OneWayPanelOptions opt = new OneWayPanelOptions();
+            switch (Direction)
+            {
+                case DirX: opt.UseSpanAngle = true; opt.SpanAngleDeg = 0.0; break;
+                case DirY: opt.UseSpanAngle = true; opt.SpanAngleDeg = 90.0; break;
+                case DirAngle:
+                    double a;
+                    if (!OneWayPanelOptions.TryParseNumber(txtAngle.Text, out a)) { Invalid(txtAngle, "Enter the span angle in degrees from global X."); return; }
+                    opt.UseSpanAngle = true;
+                    opt.SpanAngleDeg = a;
+                    break;
+                case DirAutoLong: opt.SpanningDirection = 3; break;
+                default: opt.SpanningDirection = 0; break;
+            }
 
-            if (!NoSpacing)
+            opt.NoSpacing = !chkStrips.Checked;
+            if (chkStrips.Checked)
             {
-                double s;
-                if (!OneWayPanelOptions.TryParseNumber(txtEdgeSpacing.Text, out s) || s <= 0.001)
-                {
-                    MessageBox.Show("Please enter a finite spacing greater than 0.001 mm.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    this.DialogResult = DialogResult.None;
-                    return;
-                }
-                EdgeSpacing = s;
+                double w;
+                if (!OneWayPanelOptions.TryParseNumber(txtStripWidth.Text, out w) || w <= 0.001) { Invalid(txtStripWidth, "Enter a strip width greater than 0 mm."); return; }
+                opt.EdgeSpacingMm = w;
             }
-            else
-            {
-                EdgeSpacing = 0;
-            }
-            
+
             double tol;
-            if (!OneWayPanelOptions.TryParseNumber(txtAngleTolerance.Text, out tol) || tol < 0 || tol >= 45)
+            if (!OneWayPanelOptions.TryParseNumber(txtTolerance.Text, out tol) || tol < 0 || tol >= 45) { Invalid(txtTolerance, "Enter a tolerance from 0 up to, but below, 45 degrees."); return; }
+            opt.AngleToleranceDeg = tol;
+
+            if (!convert && chkLoad.Checked)
             {
-                MessageBox.Show("Please enter an angle tolerance from 0 up to, but below, 45 degrees.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                this.DialogResult = DialogResult.None;
-                return;
+                double q;
+                if (!OneWayPanelOptions.TryParseNumber(txtLoad.Text, out q) || q == 0) { Invalid(txtLoad, "Enter a non-zero area load in kN/m2 (positive = downward)."); return; }
+                if (cboLoadCase.SelectedIndex < 0) { Invalid(cboLoadCase, "Choose a load case."); return; }
+                ApplyLoad = true;
+                LoadCaseId = cboLoadCase.SelectedIndex + 1;
+                LoadValue = q;
             }
-            AngleTolerance = tol;
+
+            Options = opt;
+
+            lastDir = Direction;
+            lastAngle = txtAngle.Text;
+            lastStrips = chkStrips.Checked;
+            lastStripWidth = txtStripWidth.Text;
+            lastTolerance = txtTolerance.Text;
+            if (!convert)
+            {
+                lastApplyLoad = chkLoad.Checked;
+                lastLoadCase = Math.Max(0, cboLoadCase.SelectedIndex);
+                lastLoad = txtLoad.Text;
+            }
+
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+
+        private void Invalid(Control field, string message)
+        {
+            MessageBox.Show(this, message, "One-Way Load Panel", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            field.Focus();
         }
     }
 }

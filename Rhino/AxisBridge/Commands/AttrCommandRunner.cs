@@ -45,6 +45,7 @@ namespace AxisBridge.Commands
 
             using (AttrFormBase form = makeForm(state, library, doc))
             {
+                form.Objects = objs;
                 DialogResult r = ShowWithPicks(form, doc);
                 if (r != DialogResult.OK || form.Result == null) return Result.Cancel;
 

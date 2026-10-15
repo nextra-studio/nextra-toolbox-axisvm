@@ -128,9 +128,13 @@ namespace AxisVM_plugin.Core
                     continue;
                 }
 
+                // An open end ("from=len:2000" with no "to") runs to the member end. Anything else
+                // reaching past the member is rejected rather than clipped - clipping would silently
+                // change the slope (and resultant) of a trapezoidal load.
                 double from = load.PositionIsRatio ? load.From * total : load.From;
-                double to = load.PositionIsRatio ? load.To * total : Math.Min(load.To, total);
-                if (from < -1e-9 || from >= total || to <= from + 1e-9)
+                double to = double.IsPositiveInfinity(load.To) ? total : (load.PositionIsRatio ? load.To * total : load.To);
+                double slack = Math.Max(1e-6, opt.MergeToleranceM);
+                if (from < -slack || to > total + slack || to <= from + 1e-9)
                 {
                     notes.Add(string.Format("{0}: a distributed load from {1:0.###} to {2:0.###} m does not lie on the member (length {3:0.###} m). Skipped.",
                         job.Context, from, to, total));
@@ -142,15 +146,20 @@ namespace AxisVM_plugin.Core
                 int lc = catalog.LoadCase(load.LoadCase);
                 if (lc <= 0) continue;
 
-                AddMemberDistLoad(job, Math.Max(0, from), Math.Min(total, to), lc, load);
+                AddMemberDistLoad(job, from, to, lc, load);
             }
         }
 
-        /// <summary>The segment containing curve distance <paramref name="s"/> and the distance along that AxisVM line.</summary>
-        private static SegRef Locate(Chain chain, double s, out double localFromLineStart)
+        /// <summary>
+        /// The segment containing curve distance <paramref name="s"/> and the position along that
+        /// segment measured from its local-x start. Every member segment's local x was set to follow
+        /// its owning curve (OrientAndOffset), so this is only mirrored where the segment belongs to
+        /// another curve drawn the other way.
+        /// </summary>
+        private SegRef Locate(Chain chain, double s, out double localPos)
         {
             double cum = 0;
-            localFromLineStart = 0;
+            localPos = 0;
             for (int i = 0; i < chain.Segs.Count; i++)
             {
                 SegRef seg = chain.Segs[i];
@@ -158,7 +167,7 @@ namespace AxisVM_plugin.Core
                 if (s <= cum + seg.Length + 1e-9 || last)
                 {
                     double along = Math.Max(0, Math.Min(seg.Length, s - cum));
-                    localFromLineStart = seg.Reversed ? seg.Length - along : along;
+                    localPos = LocalAgainstCurve(seg) ? seg.Length - along : along;
                     return seg;
                 }
                 cum += seg.Length;
@@ -166,11 +175,22 @@ namespace AxisVM_plugin.Core
             return null;
         }
 
+        /// <summary>
+        /// A local load on a segment whose local x runs against the curve: x reverses and, with the
+        /// local z reference unchanged, y reverses too (right-handed system). Moments are vectors in
+        /// the same system, so Mx and My reverse as well.
+        /// </summary>
+        private static void FlipLocal(double[] v)
+        {
+            v[0] = -v[0]; v[1] = -v[1];
+            v[3] = -v[3]; v[4] = -v[4];
+        }
+
         private void AddMemberPointLoad(LineJob job, SegRef seg, double pos, int lc, PointLoadSpec load)
         {
             ESystem sys = load.System == LoadSystem.Local ? ESystem.sysLocal : ESystem.sysGlobal;
             double[] f = (double[])load.F.Clone();
-            if (sys == ESystem.sysLocal && seg.Reversed) { f[0] = -f[0]; f[3] = -f[3]; }   // local x flips with the line
+            if (sys == ESystem.sysLocal && LocalAgainstCurve(seg)) FlipLocal(f);
 
             try
             {
@@ -206,6 +226,8 @@ namespace AxisVM_plugin.Core
         private void AddMemberDistLoad(LineJob job, double from, double to, int lc, DistLoadSpec load)
         {
             ESystem sys = load.System == LoadSystem.Local ? ESystem.sysLocal : ESystem.sysGlobal;
+            // Interpolate over the interval exactly as written; only the applied pieces are limited
+            // to the member, so a hair-line overrun never changes the load's slope.
             double span = to - from;
             double cum = 0;
             int made = 0;
@@ -221,16 +243,17 @@ namespace AxisVM_plugin.Core
                 double[] qa = Lerp(load.Q1, load.Q2, (a - from) / span);
                 double[] qb = Lerp(load.Q1, load.Q2, (b - from) / span);
 
-                // Positions along this AxisVM line (from its start node).
+                // Positions along this segment from its local-x start.
                 double la = a - (cum - seg.Length), lb = b - (cum - seg.Length);
-                if (seg.Reversed)
+                bool against = LocalAgainstCurve(seg);
+                if (against)
                 {
                     double t = la;
                     la = seg.Length - lb;
                     lb = seg.Length - t;
                     double[] tq = qa; qa = qb; qb = tq;
+                    if (sys == ESystem.sysLocal) { FlipLocal(qa); FlipLocal(qb); }
                 }
-                if (sys == ESystem.sysLocal && seg.Reversed) { qa[0] = -qa[0]; qb[0] = -qb[0]; qa[3] = -qa[3]; qb[3] = -qb[3]; }
 
                 bool trapezoid = false;
                 for (int i = 0; i < 6; i++) if (Math.Abs(qa[i] - qb[i]) > 1e-12) trapezoid = true;

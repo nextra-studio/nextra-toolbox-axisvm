@@ -13,9 +13,9 @@ See [the build guide](AxisVM%20plugin/docs/HOW-TO-BUILD.md) for installation det
 ## Cleanup
 
 Archived ConcreteDesign/StudsWall projects and pre-refactor file backups were removed
-from the working tree. Their source remains in earlier Git commits. Both the Lines ->
-One-Way Panel and Convert Load Panel -> One-Way add-ons are available; they share
-one-way geometry helpers with Rhino import.
+from the working tree. Their source remains in earlier Git commits. The former Lines ->
+One-Way Panel and Convert Load Panel -> One-Way add-ons are merged into one add-on,
+N. One-Way Load Panel; it shares one-way geometry helpers with Rhino import.
 
 Generated build files, IDE settings, Python environments and calibration runs are
 ignored. The existing AxisVM Git history and `origin` remote are preserved. Run Git

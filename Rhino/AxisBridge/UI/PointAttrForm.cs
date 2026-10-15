@@ -38,8 +38,8 @@ namespace AxisBridge.UI
                 "One row per load in global directions - add a row per load case (Duplicate moves to the next case).");
             AddPage("Loads", grid);
 
-            support.Load(State.Get(AxKeys.Support), "");
-            parts.Load(State.Get(AxKeys.Parts), "");
+            support.Load(State.Get(AxKeys.Support), "", false);
+            parts.Load(State.Get(AxKeys.Parts), "", false);
         }
     }
 }

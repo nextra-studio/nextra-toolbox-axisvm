@@ -47,8 +47,10 @@ namespace AxisBridge.UI
             public string Header;
             public Func<LoadRow, double> Get;
             public Action<LoadRow, double> Set;
-            public bool BlankWhenNull;   // q2 columns: blank = uniform
+            /// <summary>When true the cell is shown blank (e.g. uniform load: no end intensity).</summary>
             public Func<LoadRow, bool> IsNull;
+            /// <summary>What clearing the cell means; null = blank reads as 0.</summary>
+            public Action<LoadRow> OnBlank;
         }
 
         public LoadGrid(LoadKind kind, string familyKey, string title, string help)
@@ -165,7 +167,9 @@ namespace AxisBridge.UI
                     SystemColumn("Global", "Local");
                     ByColumn();
                     Num("from", "From", r => r.From, (r, v) => r.From = v);
-                    Num("to", "To", r => r.To, (r, v) => r.To = v);
+                    Num("to", "To\n(blank=end)", r => r.To, (r, v) => r.To = v);
+                    specs[specs.Count - 1].IsNull = r => double.IsNaN(r.To);
+                    specs[specs.Count - 1].OnBlank = r => r.To = r.ByLength ? double.NaN : 1.0;
                     Num("qx1", "qx start\n[kN/m]", r => r.V[0], (r, v) => r.V[0] = v);
                     Num("qy1", "qy start\n[kN/m]", r => r.V[1], (r, v) => r.V[1] = v);
                     Num("qz1", "qz start\n[kN/m]", r => r.V[2], (r, v) => r.V[2] = v);
@@ -246,8 +250,14 @@ namespace AxisBridge.UI
                 Header = header,
                 Get = r => r.V2 == null ? 0 : r.V2[idx],
                 Set = (r, v) => { if (r.V2 == null) r.V2 = (double[])r.V.Clone(); r.V2[idx] = v; },
-                BlankWhenNull = true,
-                IsNull = r => r.V2 == null
+                IsNull = r => r.V2 == null,
+                // Clearing one end cell makes that component uniform (end = start).
+                OnBlank = r =>
+                {
+                    if (r.V2 == null) return;
+                    r.V2[idx] = r.V[idx];
+                    if (LoadRow.Same(r.V, r.V2)) r.V2 = null;
+                }
             });
             grid.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -361,7 +371,7 @@ namespace AxisBridge.UI
             if (grid.Columns.Contains(ColBy)) gr.Cells[ColBy].Value = r.ByLength ? "Length" : "Ratio 0..1";
             foreach (ColumnSpec c in specs)
             {
-                bool blank = c.BlankWhenNull && c.IsNull(r);
+                bool blank = c.IsNull != null && c.IsNull(r);
                 gr.Cells[c.Name].Value = blank ? "" : LoadRow.N(c.Get(r));
             }
         }
@@ -455,7 +465,9 @@ namespace AxisBridge.UI
                 {
                     r.ByLength = byLen;
                     // Switching back to ratios: snap to a sensible default range.
+                    // Ratios and lengths do not convert without the member length: reset to "whole member".
                     if (!byLen) { r.Pos = 0.5; r.From = 0; r.To = 1; }
+                    else { r.From = 0; r.To = double.NaN; }
                     BeginInvoke((Action)Rebuild);
                 }
             }
@@ -463,29 +475,26 @@ namespace AxisBridge.UI
             {
                 ColumnSpec spec = specs.Find(c => c.Name == name);
                 if (spec == null) return;
-                if (text.Length == 0 && spec.BlankWhenNull)
+                if (text.Length == 0 && spec.OnBlank != null)
                 {
-                    // Clearing all three q-end cells makes the load uniform again.
-                    if (r.V2 != null && AllEndCellsBlank(e.RowIndex)) r.V2 = null;
+                    // A blank cell has a defined meaning per column (end intensity = start intensity,
+                    // "To" = member end); the grid is repainted so no stale value hides behind a blank.
+                    spec.OnBlank(r);
+                    BeginInvoke((Action)Rebuild);
                 }
                 else
                 {
                     double d;
                     spec.Set(r, TryNum(text, out d) ? d : 0.0);
+                    // An end intensity equal to the start everywhere is just a uniform load.
+                    if (r.V2 != null && LoadRow.Same(r.V, r.V2))
+                    {
+                        r.V2 = null;
+                        BeginInvoke((Action)Rebuild);   // show the end cells as blank (= uniform) again
+                    }
                 }
             }
             MarkTouched();
-        }
-
-        private bool AllEndCellsBlank(int rowIndex)
-        {
-            foreach (ColumnSpec c in specs)
-            {
-                if (!c.BlankWhenNull) continue;
-                object v = grid.Rows[rowIndex].Cells[c.Name].Value;
-                if (v != null && v.ToString().Trim().Length > 0) return false;
-            }
-            return true;
         }
 
         private void Grid_CellContentClick(object sender, DataGridViewCellEventArgs e)

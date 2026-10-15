@@ -9,7 +9,7 @@ namespace AxisBridge.UI
     public static class Theme
     {
         public const string VariesItem = "‹varies - keep each object's value›";
-        public const string VariesCue = "‹varies - leave blank to keep each object's value›";
+        public const string VariesCue = "‹varies› blank = keep each object's value,  - = clear on all";
 
         public static readonly Font Body = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
         public static readonly Font Bold = new Font("Segoe UI", 9F, FontStyle.Bold, GraphicsUnit.Point);

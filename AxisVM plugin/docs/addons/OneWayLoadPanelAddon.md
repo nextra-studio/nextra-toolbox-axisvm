@@ -1,102 +1,126 @@
-# One Way Load Panel Addon
+# One-Way Load Panel Addon
 
 ## Overview
-The One Way Load Panel Addon automates the generation and configuration of one-way load distribution panels in AxisVM. It is designed to quickly assign one-way spanning logic over domains and automatically split panels to accurately distribute loads to edge beams versus main spanning beams based on user-defined geometries and tributary spacings.
+Menu / toolbar entry **"N. One-Way Load Panel"** (`OneWayLoadPanelAddon.dll`). One command for both
+ways of making one-way load panels; what it does depends on the selection:
 
-## Workflow & Logic
+| Selection | Result |
+|---|---|
+| Load panels (lines may be selected too) | Each panel is rebuilt as one-way panel(s) on the members under its outline. Its loads are moved onto the new panels. |
+| Lines only | Each closed boundary in the selection gets new one-way panel(s), optionally with an area load. |
 
-### 0. Edge chain reconstruction (`Functions/EdgeChainBuilder.cs`)
-- Real bays often have one physically-straight side split into several collinear beam segments
-  (columns dropped in, secondary beams framing, meshing). Before anything else, each boundary
-  group's segments are chained into **logical edges**: two segments are joined into one side only
-  when the bend where they meet is within the **Angle Tolerance** (default 15°, so 90° corners stay
-  as edge boundaries and a rectangular bay comes back as exactly four sides). This is the same
-  "smaller bend angle vs tolerance" test as `EndPinAssignFunction.IsContinuousStrict`.
-- Every downstream step (span direction, support/edge classification, edge-strip splitting) then
-  works on these polyline sides. A side that is a single line behaves exactly as before; a side
-  made of three beams has its offset points placed on whichever sub-segment straddles the spacing,
-  and only that sub-segment is split. Strip and centre contours are built from segment *lists*.
-- If the reconstruction does not yield exactly 2 support + 2 edge sides (L-shaped panel, genuine
-  5+ sided bay, obtuse corner merged away), the with-spacing path is skipped and a single one-way
-  panel is generated instead, with a note in the summary.
+A window selection picks a panel together with its edge lines, so selected panels take priority.
+This add-on replaces the former "N. Lines -> One-Way Panel" and "N. Convert Load Panel -> One-Way"
+add-ons. Remove `ConvertLoadPanelOneWayAddon.dll` from `C:\AXISVM X8\AddOns` when updating.
 
-### 1. Selection & Input Gathering
-- The user provides straight lines forming a horizontal closed boundary. Sloped panels and arcs
-  are rejected because spanning directions are calculated in the global XY plane.
-  Sides may be subdivided into multiple collinear segments — see section 0.
-- **Multiple boundaries in one run**: the selection does not have to be a single bay. `GroupByConnectivity`
-  splits the selected lines into independent boundaries — two lines belong to the same boundary when they
-  share an end node, transitively — and each group is converted into its own panel set. Only disconnected closed loops are independent groups. Adjacent bays sharing nodes or beams
-  are one connected graph and must be selected separately; branches are rejected before splitting.
-- The whole run sits inside a single `BeginUpdate` / `EndUpdate` pair (`try/finally`), so AxisVM redraws once.
-- Each group is remembered by **line UID** and re-resolved to indices immediately before it is built. This
-  matters because the edge-spacing path splits the main beams, which renumbers every line index after the
-  split point — indices captured before the first group runs are stale by the time the second one does.
-  Node ids are unaffected: splitting only adds nodes, it never removes them.
-- The UI prompts the user for configuration parameters:
-  - **Span Direction**: Direction 1 or 2 (defining which way the main slab/deck spans).
-  - **Spacing / Splitting Strategy**: User inputs a spacing value (e.g., 300mm for edge beam tributary width).
-  - **No Spacing Checkbox**: If checked, the spacing logic is bypassed, and a single one-way panel is generated over the entire domain.
+## Dialog
+- The header says what the run will do with the current selection.
+- **Span direction**: Auto - shorter span, Auto - longer span, Global X, Global Y, or an angle
+  from global X. Both Auto options work per panel from its own edges (not global X/Y), so they
+  suit rotated bays; "longer" is "shorter" turned 90° (`SpanningDirection` 0 / 3). The supports
+  (receiving lines) are the sides across the span.
+- **Edge strips**: split off a strip of the given width (the joist spacing) along each edge beam.
+  The strip loads the edge beam, and the centre spans between the supports.
+- **Load**: when creating from lines, an optional area load (load case, kN/m², positive downward).
+  When converting, the existing loads are carried over (see below).
+- The preview redraws with every change. Settings are remembered for the AxisVM session.
+- After the run, a report lists every note in a scrollable, copyable box.
 
-### 2. Basic Generation (No Spacing)
-- If the user selects "No Spacing", the script retrieves the geometric domain defined by the 4 selected boundary lines.
-- It calculates the shortest span between the opposing parallel (or near-parallel) boundary lines.
-- It generates a single `IAxisVMLoadPanel` covering the domain and explicitly sets its load distribution attribute to "One-Way", assigning the span direction to match the calculated shortest span or user override.
+## Converting a load panel (`OneWayLoadPanelLogic.ConvertPanel`)
+1. **Outline onto members** (`PanelBoundaryResolver`). The outline comes from the panel's contour
+   lines, or from its contour polygon when it was drawn as a free polygon (such a panel has no
+   contour lines). Each outline edge is covered by the existing lines lying on it, ranked
+   beam/rib/truss, then domain edge, then plain line. A plain line is only created to bridge a
+   stretch no line covers, and this is reported.
+   *Earlier versions drew a new line along every polygon edge. That put a plain line on top of each
+   edge beam, the panel sent its load to those plain lines, and the load never reached the structure.*
+2. **Validate** before touching the model. On failure the panel is left unchanged and any bridging
+   lines are removed.
+3. **Capture and delete its loads** (`PanelLoadCarrier`): whole-panel area loads, polygon area loads
+   and point loads. Line and polyline loads are counted and reported as not carried over.
+4. **Delete the panel**, required because `AddFromLineIDs` on the same contour is otherwise
+   rejected with `lopeSameLoadPanelExists`.
+5. **Generate** the one-way panel(s) with `OneWayPanelBuilder`. If nothing can be built, a plain
+   (two-way) panel is restored so the user is never left with a hole.
+6. **Re-apply the loads**. A whole-panel load goes onto every new panel at the same intensity. A
+   polygon load is re-added once with its own outline, and AxisVM attaches it to every panel it
+   covers. A point load goes to the panel containing it.
+7. **Check receivers**: any receiving line without a beam/rib/truss element is reported, because
+   AxisVM drops load sent to it.
 
-### 3. Advanced Splitting (With Spacing)
-- If a spacing is provided (e.g., 300mm for edge beam tributary), the addon performs a geometric split of the domain to ensure realistic load paths.
-- **Edge Strips**: It offsets the boundary lines parallel to the edge beams inward by the spacing value (e.g., 300mm). This creates two narrow rectangular strips along the edges.
-- **Center Strip**: The remaining area between the edge strips becomes the center panel.
-- **Panel Assignment**: 
-  - The script generates separate `IAxisVMLoadPanel` objects for each calculated strip.
-  - The **edge strips** are configured to distribute load directly to the edge beams.
-  - The **center strip** is configured as a one-way panel spanning across the main beams, ignoring the edge beams.
+### Load records
+AxisVM has no typed getter for load panel loads, so `IAxisVMLoads.GetLoad` returns raw bytes. The
+layouts were measured on AxisVM X8 (type library 18.100):
 
-### 4. Application
-- The model enters an `Update` state to ensure bulk generation is fast.
-- The newly generated domains and load panels are committed to the AxisVM model.
-- Load panel distribution parameters are strictly enforced via the AxisVM COM API.
+| Load | LoadType | Bytes | Layout |
+|---|---|---|---|
+| Whole-panel area (`AddLoadPanelLinear`) | -1 | 120 | int case@0, panel@4, dist@8, ldist@12, component@16; double P1@24, P2@32, P3@40; x1..z3@48 |
+| Polygon area (`AddLoadPanelPolyArea`) | 0x21 | 120 | int case@0, dist@4, ldist@8, component@12; double P1@16, P2@24, P3@32; x1..z3@40; int window@112. Its panels come from `GetDomains_Surfaces_LoadPanels` |
+| Point (`AddLoadPanelConcentrated`) | -1 | 88 | int case@0, panel@4; double Fx..Mz@8; x,y,z@56; int system@80, reference@84 |
 
-### 5. Reporting
-- One summary dialog for the whole run: panels created, how many of the selected boundary groups
-  succeeded, and a note per boundary that had to be downgraded or that AxisVM rejected. A message box per
-  boundary would be unusable once several bays are selected at once.
-- When the edge-spacing path fails part-way through (after it has already split beams), each successful split replaces the deleted parent UID with both child UIDs in the logical edge.
-  The fallback resolves these surviving child UIDs, retaining the full boundary. Temporary panels and
-  inset lines are removed; valid beam splits remain in the model.
+For a constant load AxisVM stores the intensity in the slot of its axis (P3 for a Z load).
+`GetDomains_Surfaces_LoadPanels` returns an error for whole-panel and point loads; they are
+matched by `ElementId` and the panel index inside the record.
+
+## Creating from lines (`OneWayLoadPanelLogic.CreateFromLines`)
+- Straight, horizontal, closed boundaries. `GroupByConnectivity` splits the selection into
+  independent boundaries (lines sharing end nodes, transitively). Adjacent bays share beams and
+  must be selected separately; branches are rejected before splitting.
+- If a plain line and a member lie on the same two nodes (a duplicate, often left by an earlier
+  run), only the member is used.
+- Groups are remembered by line UID, because the edge-strip split renumbers line indexes.
+
+## Geometry (`OneWayPanelBuilder`, `EdgeChainBuilder`, shared with Rhino import)
+- **Edge chains**: collinear segments are chained into one logical side when the bend between them
+  is within the straight-side tolerance (default 15°), so a side split into several beams is one side.
+- **Classification**: sides across the span are supports; sides along it are edge beams.
+- **Receivers and the tolerance**: a panel's load direction is the span (single and centre
+  panels) or the direction toward the edge beam (edge strips). A boundary side or an interior
+  beam/rib/truss receives load when it runs at 90° ± tolerance to that direction (tolerance 10 =
+  80° to 100°). Interior members must lie in the panel plane and pass through its inside; plain
+  lines never receive. AxisVM shares the load between all receivers by tributary width and loads
+  only the part of a member inside the panel, so interior beams are not split (measured: 6 x 4 m
+  bay, mid-span beam, 6 kN/m² gives 36 / 72 / 36 kN; with 300 mm strips the mid beam takes
+  2 x 5.4 x q). The same tolerance also decides how far a side may bend and still be one side.
+- **Rhino import**: uses this builder, so interior beams receive load there too. The tolerance is
+  the panel's `Ax_SpanTolerance` (degrees, AxDomain > Load panel > Angle tolerance); blank = 5.
+- **Single panel**: one panel over the boundary, receiving lines = the supports (`SetLines`, plus
+  `SelectedEdge` flags in contour order).
+- **Edge strips**: each support is split at the strip width from both corners (only the segment
+  straddling the point), plain inset lines join the split points, and three panels are built: two
+  strips feeding the edge beams and a centre panel feeding the supports. This needs exactly 2
+  supports + 2 edge beams; otherwise a single panel is made, with a note.
+- Failure part-way through removes temporary panels and inset lines; valid beam splits remain.
+
+## Verification (2026-10-15)
+Run against a live AxisVM X8 model (6 x 4 m bays on 300x300 beams and columns), with the
+production source compiled into an out-of-process harness:
+- Line-based panel converted with 300 mm strips: area load -5 kN/m² and point load -10 kN carried,
+  receiving lines all beams.
+- Panel drawn as a polygon over beams, with a -2 kN/m² polygon load: no duplicate lines created,
+  polygon load re-attached to all three new panels.
+- Lines selection including a plain duplicate over a beam, plus 1.5 kN/m²: duplicate ignored.
+- Linear analysis: support reactions 214 kN = 5·24 + 10 + 2·24 + 1.5·24.
+
+## Validation
+- Numeric inputs accept the current locale's decimal separator and an invariant decimal point,
+  without thousands separators. NaN and infinity are rejected.
+- Tolerance must be at least 0 and below 45°; strip width must exceed 0.001 mm.
+- Open or branched boundaries, zero-length segments, arcs and non-horizontal boundaries are rejected
+  before the model changes.
+- A panel must have receiving lines. `SetLines` must report the expected count; otherwise the
+  unconfigured panel is deleted and the error is reported.
 
 ## File Structure
-- `Addons/OneWayLoadPanelAddon.cs`: AxisVM COM registration + icon for "N. Lines -> One-Way Panel".
-- `UI/OneWayLoadPanelForm.cs`: span direction / spacing / tolerance dialog.
-- `Functions/OneWayLoadPanelLogic.cs`: selection + dialog + summary for the line-based workflow (`Execute`).
-- `Functions/OneWayPanelBuilder.cs`: **shared** geometry engine — edge classification, panel
-  creation, the edge-strip split (`GeneratePanels`, `OneWayPanelOptions`). Compiled into both addons.
-- `Functions/EdgeChainBuilder.cs`: **shared** — reconstructs subdivided boundary sides into logical
-  polyline edges.
-- The "Convert Load Panel" addon (`ConvertLoadPanelOneWayAddon.csproj`) is a separate DLL that
-  reuses `OneWayPanelBuilder` / `EdgeChainBuilder` — see `ConvertLoadPanelOneWayAddon.md`.
-
-## Validation and failure handling (2026-10-14 refactor)
-- Numeric inputs accept the current locale's decimal separator and an invariant decimal point,
-  without thousands separators. This avoids interpreting the default `15.0` as `150` under Dutch
-  regional settings. NaN and infinity are rejected.
-- Angle tolerance must be at least 0 and below 45 degrees; spacing must exceed 0.001 mm.
-- Duplicate lines, open or branched boundaries, zero-length segments, arcs and nonhorizontal
-  boundaries are rejected before generation changes the model.
-- A panel must have receiving lines. `SetLines` must report the expected count; configuration
-  errors delete the unconfigured panel and are surfaced. SAFEARRAY contour reads accept either
-  zero-based or one-based arrays; AxisVM edge indices remain one-based.
-- Cleanup is centralized and runs on both normal failure returns and exceptions. Cleanup failures
-  are reported rather than silently ignored. This is not a full model transaction: successful beam
-  splits remain after an unsuccessful spaced attempt.
-- The shared conversion workflow validates before deleting an existing panel, receives surviving
-  boundary UIDs even on exceptions, and attempts to restore its contour and captured loads.
-  A failed restoration is reported explicitly.
+- `Addons/OneWayLoadPanelAddon.cs`: registration shell (menu text, icon).
+- `Functions/OneWayLoadPanelLogic.cs`: selection, both workflows, receiver check, report.
+- `Functions/PanelBoundaryResolver.cs`: panel outline onto existing members.
+- `Functions/PanelLoadCarrier.cs`: capture / delete / re-apply panel loads.
+- `Functions/OneWayPanelBuilder.cs`, `Functions/EdgeChainBuilder.cs`: shared geometry engine.
+- `UI/OneWayLoadPanelForm.cs`: dialog with preview. `UI/OneWayPanelReportForm.cs`: run report.
 
 ## Regression checks
-`Checks/OneWayPanelChecks.csproj` compiles the production builder and edge-chain code against an
-in-memory AxisVM API double. It simulates deletion of split parent UIDs, line-index renumbering,
-closed-contour validation, and failures during splitting, panel creation and configuration.
-These checks do not establish actual COM behavior or verify solved load distribution in AxisVM.
-Build the add-on against the installed AxisVM assemblies, then check a disposable AxisVM model
-before installing it for production use.
+`Checks/OneWayPanelChecks.csproj` compiles the builder and edge-chain code against an in-memory
+AxisVM API double (split UID deletion, index renumbering, contour validation, failures during
+splitting, panel creation and configuration). It does not cover COM behaviour or load transfer;
+check those on a disposable AxisVM model, as in the verification above.

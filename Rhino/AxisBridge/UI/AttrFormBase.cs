@@ -29,6 +29,9 @@ namespace AxisBridge.UI
         /// <summary>Set before closing with Retry; the command runs it, then re-shows the dialog.</summary>
         public Action<RhinoDoc> PendingPick { get; set; }
 
+        /// <summary>The objects being edited (set by the command before the dialog is shown).</summary>
+        public IList<Rhino.DocObjects.RhinoObject> Objects { get; set; }
+
         protected readonly List<Field> Fields = new List<Field>();
         protected readonly List<LoadGrid> Grids = new List<LoadGrid>();
         protected readonly TabControl Tabs;
@@ -172,11 +175,36 @@ namespace AxisBridge.UI
         /// <summary>Closes the dialog to pick surfaces; their ids are handed to <paramref name="onPicked"/>.</summary>
         protected void RequestSurfacePick(string prompt, Action<List<Guid>> onPicked)
         {
+            RequestPick(prompt, Rhino.DocObjects.ObjectType.Surface | Rhino.DocObjects.ObjectType.Brep | Rhino.DocObjects.ObjectType.Curve, onPicked);
+        }
+
+        /// <summary>Closes the dialog to pick a direction from two points (the dialog comes back afterwards).</summary>
+        protected void RequestDirectionPick(string prompt, Action<Rhino.Geometry.Vector3d> onPicked)
+        {
+            PendingPick = doc =>
+            {
+                var g1 = new GetPoint();
+                g1.SetCommandPrompt(prompt + " - start point");
+                if (g1.Get() != GetResult.Point) return;
+                Rhino.Geometry.Point3d a = g1.Point();
+                var g2 = new GetPoint();
+                g2.SetCommandPrompt(prompt + " - end point");
+                g2.SetBasePoint(a, true);
+                g2.DrawLineFromPoint(a, true);
+                if (g2.Get() != GetResult.Point) return;
+                onPicked(g2.Point() - a);
+            };
+            DialogResult = DialogResult.Retry;
+        }
+
+        /// <summary>Closes the dialog to pick objects of the given types; their ids go to <paramref name="onPicked"/>.</summary>
+        protected void RequestPick(string prompt, Rhino.DocObjects.ObjectType filter, Action<List<Guid>> onPicked)
+        {
             PendingPick = doc =>
             {
                 var go = new GetObject();
                 go.SetCommandPrompt(prompt);
-                go.GeometryFilter = Rhino.DocObjects.ObjectType.Surface | Rhino.DocObjects.ObjectType.Brep | Rhino.DocObjects.ObjectType.Curve;
+                go.GeometryFilter = filter;
                 go.EnablePreSelect(false, true);
                 go.DeselectAllBeforePostSelect = false;
                 if (go.GetMultiple(1, 0) != GetResult.Object) return;

@@ -39,6 +39,8 @@ namespace AxisBridge.Attributes
         public const string Thickness = "Ax_Thickness";
         public const string SpanDirection = "Ax_SpanDirection";
         public const string EdgeSpacing = "Ax_EdgeSpacing";
+        public const string SpanTolerance = "Ax_SpanTolerance"; // one-way panel: degrees off 90 deg a receiving member may be
+        public const string LoadTargets = "Ax_LoadTargets";   // two-way load panel: ids of the only curves/points receiving its load
 
         // Common
         public const string Parts = "Ax_Parts";
@@ -49,7 +51,7 @@ namespace AxisBridge.Attributes
         private static readonly HashSet<string> ExactKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             Guid, Support, Type, Material, Section, Release, LocalAxis, Eccentricity,
-            Stiffness, HingeDomains, CoupledDof, FeType, Thickness, SpanDirection, EdgeSpacing, Parts
+            Stiffness, HingeDomains, CoupledDof, FeType, Thickness, SpanDirection, EdgeSpacing, SpanTolerance, LoadTargets, Parts
         };
 
         /// <summary>

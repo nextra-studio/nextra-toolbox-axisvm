@@ -20,7 +20,7 @@ namespace AxisBridge.UI
         public static readonly string[] ScalarKeys =
         {
             AxKeys.FeType, AxKeys.Material, AxKeys.Thickness, AxKeys.LocalAxis, AxKeys.Eccentricity,
-            AxKeys.SpanDirection, AxKeys.EdgeSpacing, AxKeys.Parts
+            AxKeys.SpanDirection, AxKeys.EdgeSpacing, AxKeys.SpanTolerance, AxKeys.LoadTargets, AxKeys.Parts
         };
         public static readonly string[] FamilyKeys = { AxKeys.DistLoad, AxKeys.PointLoad };
 
@@ -29,12 +29,15 @@ namespace AxisBridge.UI
         private readonly TextField thickness;
         private readonly TextField localAxis;
         private readonly TextField eccentricity;
-        private readonly ComboField spanDir;
+        private readonly SpanField spanDir;
+        private readonly TargetsField targets;
+        private PanelPreview preview;
         private readonly TextField edgeSpacing;
+        private readonly TextField spanTolerance;
         private readonly TextField parts;
 
         private readonly TabPage pageDomain, pagePanel, pageLoads, pageParts;
-        private readonly FieldPage.Row rowSpan, rowSpacing, rowTwoWayNote;
+        private readonly FieldPage.Row rowSpan, rowSpacing, rowTolerance, rowTwoWayNote, rowTargets, rowOneWayNote, rowTwoWaySection, rowOneWaySection;
 
         public DomainAttrForm(SelectionState state, AxLibrary library, RhinoDoc doc)
             : base("AxDomain - surface attributes",
@@ -59,18 +62,31 @@ namespace AxisBridge.UI
 
             // ---- Load panel ---------------------------------------------------
             var pan = new FieldPage();
-            pan.Section("Load panel");
-            rowTwoWayNote = pan.AddWide(Theme.Hint("A two-way load panel distributes its loads to all surrounding members/edges. It needs no further input - add loads on the Loads tab."));
-            spanDir = Track(new ComboField(AxKeys.SpanDirection, true));
-            spanDir.SetItems(new[]
+
+            // Two-way: where the load goes.
+            rowTwoWaySection = pan.Section("Two-way load panel - load transfer");
+            rowTwoWayNote = pan.AddWide(Theme.Hint("The load is shared by the members it rests on. Leave it automatic, or pick exactly which beams / walls / columns (curves or points) carry it - e.g. a slab spanning between two beams only."));
+            targets = Track(new TargetsField());
+            targets.PickRequested += () => RequestPick("Pick the members (curves) and nodes (points) that receive this panel's load - Enter when done",
+                Rhino.DocObjects.ObjectType.Curve | Rhino.DocObjects.ObjectType.Point, ids => targets.AddPicked(ids));
+            rowTargets = pan.Add("Load goes to", targets.Control);
+
+            // One-way: span direction.
+            rowOneWaySection = pan.Section("One-way load panel - span");
+            rowOneWayNote = pan.AddWide(Theme.Hint("The load spans in one direction to the edges perpendicular to it. The blue arrow in the viewport shows the span of every selected panel while this dialog is open."));
+            spanDir = Track(new SpanField());
+            spanDir.PickRequested += () => RequestDirectionPick("Span direction", v =>
             {
-                new KeyValuePair<string, string>("Auto - along the shorter span", ""),
-                new KeyValuePair<string, string>("Along global X", "x"),
-                new KeyValuePair<string, string>("Along global Y", "y")
+                string text = SpanTools.VectorText(v);
+                if (text.Length > 0) spanDir.SetPicked(text);
             });
-            rowSpan = pan.Add("Span direction", spanDir.Control, "Direction the slab spans (load goes to the edges perpendicular to it). You can also type a vector, e.g. 1,1,0.");
-            edgeSpacing = Track(new TextField(AxKeys.EdgeSpacing, "0 = one panel over the whole bay"));
+            rowSpan = pan.Add("Span direction", spanDir.Control,
+                "Auto = the shorter span of the panel's smallest enclosing rectangle - also for L-shaped or skewed panels. Directions are in the global XY plane.");
+            edgeSpacing = Track(new TextField(AxKeys.EdgeSpacing, "blank = one panel over the whole bay"));
             rowSpacing = pan.Add("Edge strip width", edgeSpacing.Control, "Optional tributary edge-strip width in " + DocUnitName + "; creates two edge strips plus a centre panel.");
+            spanTolerance = Track(new TextField(AxKeys.SpanTolerance, "blank = 5"));
+            rowTolerance = pan.Add("Angle tolerance [deg]", spanTolerance.Control,
+                "Edges and beams inside the panel at 90 deg +/- this angle to the span receive its load (e.g. 10 = 80 to 100 deg). Also how much a side may bend and still count as straight.");
             pagePanel = AddPage("Load panel", pan);
 
             // ---- Loads --------------------------------------------------------
@@ -92,8 +108,51 @@ namespace AxisBridge.UI
             pageParts = AddPage("Parts", partPage);
 
             LoadFields();
-            feType.Changed += (s, e) => UpdateVisibility();
+            spanDir.Changed += (s, e) => UpdatePreview();
+            targets.Changed += (s, e) => UpdatePreview();
+            Shown += (s, e) =>
+            {
+                // Live arrows / highlights in the viewport while the dialog is open.
+                if (preview == null && Objects != null)
+                {
+                    preview = new PanelPreview(Doc, Objects);
+                    preview.Enabled = true;
+                }
+                UpdatePreview();
+            };
+            feType.Changed += (s, e) =>
+            {
+                // Turning a load panel into a domain: its material / thickness now matter - write what is shown.
+                string t2 = CurrentType;
+                if (t2 != null && !AxSchema.IsLoadPanel(t2))
+                {
+                    if (!material.ShowsVaries && !material.Touched && material.Value.Length > 0) material.Assign(material.Value);
+                    if (!thickness.ShowsVaries && !thickness.Touched && thickness.Value.Length > 0) thickness.Assign(thickness.Value);
+                }
+                UpdateVisibility();
+                UpdatePreview();
+            };
             UpdateVisibility();
+        }
+
+        private void UpdatePreview()
+        {
+            if (preview == null) return;
+            string t = CurrentType;
+            preview.SpanValue = t == AxSchema.OneWayLoadPanel ? spanDir.PreviewValue : null;
+            preview.SetTargets(t == AxSchema.LoadPanel ? targets.Ids : new List<Guid>());
+            preview.Refresh();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && preview != null)
+            {
+                preview.Enabled = false;
+                preview.Refresh();
+                preview = null;
+            }
+            base.Dispose(disposing);
         }
 
         private string CurrentType { get { return feType.ShowsVaries ? null : feType.Value; } }
@@ -102,15 +161,19 @@ namespace AxisBridge.UI
         {
             FieldState t = State.Get(AxKeys.FeType);
             string typeNow = t.Kind == FieldStateKind.Same ? (AxSchema.NormalizeSurfaceType(t.Value) ?? AxSchema.Shell) : AxSchema.Shell;
-            feType.Load(t.Kind == FieldStateKind.Same ? FieldState.Of(typeNow) : t, AxSchema.Shell);
+            // Surfaces without a type are being tagged for the first time: write the shown defaults.
+            bool fresh = t.Kind == FieldStateKind.AbsentAll;
+            feType.Load(t.Kind == FieldStateKind.Same ? FieldState.Of(typeNow) : t, AxSchema.Shell, fresh);
 
-            material.Load(State.Get(AxKeys.Material), "C30/37");
-            thickness.Load(State.Get(AxKeys.Thickness), DocLength(0.2));
-            localAxis.Load(State.Get(AxKeys.LocalAxis), "");
-            eccentricity.Load(State.Get(AxKeys.Eccentricity), "");
-            spanDir.Load(State.Get(AxKeys.SpanDirection), "");
-            edgeSpacing.Load(State.Get(AxKeys.EdgeSpacing), "");
-            parts.Load(State.Get(AxKeys.Parts), "");
+            material.Load(State.Get(AxKeys.Material), "C30/37", fresh);
+            thickness.Load(State.Get(AxKeys.Thickness), DocLength(0.2), fresh);
+            localAxis.Load(State.Get(AxKeys.LocalAxis), "", fresh);
+            eccentricity.Load(State.Get(AxKeys.Eccentricity), "", fresh);
+            spanDir.Load(State.Get(AxKeys.SpanDirection), "", fresh);
+            targets.Load(State.Get(AxKeys.LoadTargets), "", fresh);
+            edgeSpacing.Load(State.Get(AxKeys.EdgeSpacing), "", fresh);
+            spanTolerance.Load(State.Get(AxKeys.SpanTolerance), "", fresh);
+            parts.Load(State.Get(AxKeys.Parts), "", fresh);
         }
 
         private void UpdateVisibility()
@@ -121,9 +184,15 @@ namespace AxisBridge.UI
             bool panel = all || AxSchema.IsLoadPanel(t);
             bool oneWay = all || t == AxSchema.OneWayLoadPanel;
 
-            rowTwoWayNote.Visible = all || t == AxSchema.LoadPanel;
+            bool twoWay = all || t == AxSchema.LoadPanel;
+            rowTwoWaySection.Visible = twoWay;
+            rowTwoWayNote.Visible = twoWay;
+            rowTargets.Visible = twoWay;
+            rowOneWaySection.Visible = oneWay;
+            rowOneWayNote.Visible = oneWay;
             rowSpan.Visible = oneWay;
             rowSpacing.Visible = oneWay;
+            rowTolerance.Visible = oneWay;
 
             var pages = new List<TabPage>();
             if (domain) pages.Add(pageDomain);
@@ -135,7 +204,22 @@ namespace AxisBridge.UI
 
         protected override string ValidateInput()
         {
-            if (CurrentType != null && !AxSchema.IsLoadPanel(CurrentType) && thickness.Touched)
+            if (CurrentType == AxSchema.LoadPanel && targets.IsIncomplete)
+                return "'Only the members / nodes I pick' is selected, but nothing was picked. Pick the members, or switch back to Automatic.";
+            if (CurrentType == AxSchema.OneWayLoadPanel && spanDir.Touched)
+            {
+                Rhino.Geometry.Vector3d v;
+                if (!SpanTools.IsAutoLong(spanDir.Value) && !SpanTools.Resolve(spanDir.Value, null, out v) && spanDir.Value.Length > 0)
+                    return "The custom span direction must be a vector like 1,0,0 (and not vertical).";
+            }
+            if (CurrentType == AxSchema.OneWayLoadPanel && spanTolerance.Touched && spanTolerance.Value.Trim().Length > 0)
+            {
+                double tol;
+                if (!double.TryParse(spanTolerance.Value.Replace(',', '.'), System.Globalization.NumberStyles.Float,
+                                     System.Globalization.CultureInfo.InvariantCulture, out tol) || tol < 0 || tol >= 45)
+                    return "The angle tolerance must be from 0 up to, but below, 45 degrees (blank = 5).";
+            }
+            if (CurrentType != null && !AxSchema.IsLoadPanel(CurrentType) && thickness.Touched && thickness.Value != "-")
             {
                 double d;
                 if (!double.TryParse(thickness.Value.Replace(',', '.'), System.Globalization.NumberStyles.Float,

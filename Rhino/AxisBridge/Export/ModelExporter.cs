@@ -50,6 +50,8 @@ namespace AxisBridge.Export
                 : doc.Objects.FindByFilter(new ObjectEnumeratorSettings { NormalObjects = true, LockedObjects = true });
 
             double tol = doc.ModelAbsoluteTolerance;
+            var exported = new HashSet<Guid>();
+            var targetIds = new List<Guid>();
 
             foreach (RhinoObject obj in objects)
             {
@@ -67,6 +69,51 @@ namespace AxisBridge.Export
                     continue;
                 }
 
+                ExportOne(obj, attrs, tol, model, res);
+                exported.Add(obj.Id);
+                CollectTargets(attrs, targetIds);
+            }
+
+            // A load panel's target members must be in the file, even if they were not selected or
+            // carry no tag - otherwise AxisVM cannot send the load to them.
+            foreach (Guid id in targetIds)
+            {
+                if (exported.Contains(id)) continue;
+                RhinoObject t = doc.Objects.FindId(id);
+                if (t == null || t.IsDeleted)
+                {
+                    res.Warnings.Add("A load panel names a load-target member that no longer exists (" + id.ToString().Substring(0, 8) + "). Re-pick the panel's targets with AxDomain.");
+                    continue;
+                }
+                var tAttrs = AttrReader.GetAxAttributes(t);
+                ExportOne(t, tAttrs, tol, model, res);
+                exported.Add(id);
+                res.Warnings.Add(ObjLabel(t) + ": exported because a load panel sends its load to it.");
+            }
+
+            model.Warnings = res.Warnings;
+
+            string json = JsonConvert.SerializeObject(model, Formatting.Indented);
+            File.WriteAllText(filePath, json, Encoding.UTF8);
+
+            return res;
+        }
+
+        private static void CollectTargets(Dictionary<string, string> attrs, List<Guid> into)
+        {
+            string text;
+            if (!attrs.TryGetValue(AxKeys.LoadTargets, out text) || string.IsNullOrEmpty(text)) return;
+            foreach (string part in text.Split(';'))
+            {
+                Guid g;
+                if (Guid.TryParse(part.Trim(), out g) && !into.Contains(g)) into.Add(g);
+            }
+        }
+
+        /// <summary>Writes one object as point, line or surface(s).</summary>
+        private static void ExportOne(RhinoObject obj, Dictionary<string, string> attrs, double tol, ExportModelDto model, ExportResult res)
+        {
+            {
                 string guid = obj.Id.ToString();
                 attrs[AxKeys.Guid] = guid;
                 string label = ObjLabel(obj);
@@ -74,7 +121,7 @@ namespace AxisBridge.Export
                 if (obj.Geometry is Mesh)
                 {
                     res.Warnings.Add(label + ": meshes are not supported - convert it to a planar surface. Skipped.");
-                    continue;
+                    return;
                 }
 
                 switch (AxClassify.KindOf(obj, attrs))
@@ -125,13 +172,6 @@ namespace AxisBridge.Export
                         break;
                 }
             }
-
-            model.Warnings = res.Warnings;
-
-            string json = JsonConvert.SerializeObject(model, Formatting.Indented);
-            File.WriteAllText(filePath, json, Encoding.UTF8);
-
-            return res;
         }
 
         /// <summary>
@@ -155,9 +195,15 @@ namespace AxisBridge.Export
             if (faces.Count > 1)
                 for (int i = 0; i < pointLoads.Count; i++) owner[i] = NearestFace(faces, pointLoads[i]);
 
+            // Suffix decided from the ORIGINAL object (not from how many faces survived), the same rule
+            // the AxEdgeHinge face picker uses - so a picked "<id>_f2" always matches.
+            bool multiFace = OriginalFaceCount(obj.Geometry) > 1;
+
             for (int fi = 0; fi < faces.Count; fi++)
             {
-                string faceGuid = faces.Count == 1 ? guid : guid + "_f" + fi;
+                // The Brep face index (not the list position) so ids picked per face in Rhino stay valid.
+                int faceIndex = faces[fi].Face != null ? faces[fi].Face.FaceIndex : fi;
+                string faceGuid = multiFace ? guid + "_f" + faceIndex : guid;
                 var fa = new Dictionary<string, string>(attrs, StringComparer.OrdinalIgnoreCase);
                 fa[AxKeys.Guid] = faceGuid;
 
@@ -180,6 +226,13 @@ namespace AxisBridge.Export
                 });
                 res.DomainCount++;
             }
+        }
+
+        private static int OriginalFaceCount(GeometryBase g)
+        {
+            if (g is Brep b) return b.Faces.Count;
+            if (g is Extrusion e) { Brep eb = e.ToBrep(); return eb != null ? eb.Faces.Count : 1; }
+            return 1;
         }
 
         private static int NearestFace(List<FlattenedFace> faces, string load)

@@ -41,8 +41,12 @@ namespace AxisBridge.UI
             Changed?.Invoke(this, EventArgs.Empty);
         }
 
-        /// <summary>Fills the field from the selection. Absent keys show the default and count as touched.</summary>
-        public void Load(FieldState state, string defaultValue)
+        /// <summary>
+        /// Fills the field from the selection. Absent keys show the default; it is only written when
+        /// <paramref name="writeDefault"/> is set (objects being tagged for the first time) - editing
+        /// existing objects never adds values the user did not touch.
+        /// </summary>
+        public void Load(FieldState state, string defaultValue, bool writeDefault)
         {
             loading = true;
             try
@@ -52,7 +56,7 @@ namespace AxisBridge.UI
                 {
                     case FieldStateKind.Same: SetValue(state.Value); Touched = false; break;
                     case FieldStateKind.Varies: SetVaries(); Touched = false; break;
-                    default: SetValue(defaultValue ?? ""); Touched = !string.IsNullOrEmpty(defaultValue); break;
+                    default: SetValue(defaultValue ?? ""); Touched = writeDefault && !string.IsNullOrEmpty(defaultValue); break;
                 }
             }
             finally { loading = false; }
