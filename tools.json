@@ -1,0 +1,20 @@
+{
+  "_comment": "Single source of truth for the toolbox. Add one entry per new tool, then run: python scripts/Build-Docs.py. Install-Addons.ps1, New-Release.ps1 and the README/guide tables all read this file. status: released | wip.",
+  "tools": [
+    { "id": "RhinoImport", "menu": "N. Rhino Import", "title": "Rhino import", "dll": "RhinoImportAddon.dll", "guide": "rhino-import.md", "status": "released",
+      "summary": "Import AxisBridge JSON geometry and structural attributes." },
+    { "id": "OneWayLoadPanel", "menu": "N. One-Way Load Panel", "title": "One-way load panels", "dll": "OneWayLoadPanelAddon.dll", "guide": "one-way-panels.md", "status": "released",
+      "summary": "Convert panels or create them from lines; choose span and edge strips." },
+    { "id": "LoadPanelTools", "menu": "N. Load Panel Tools", "title": "Load panel tools", "dll": "LoadPanelToolsAddon.dll", "guide": "panel-tools.md", "status": "released",
+      "summary": "Convert panel/domain, split, and merge panels." },
+    { "id": "EndPinAssign", "menu": "N. End Pin Assign", "title": "End pin assign", "dll": "EndPinAssignAddon.dll", "guide": "end-pins.md", "status": "released",
+      "summary": "Apply hinges and semi-rigid end releases." },
+    { "id": "ReactionTransfer", "menu": "N. Reaction Transfer", "title": "Reaction transfer", "dll": "ReactionTransferAddon.dll", "guide": "reaction-transfer.md", "status": "released",
+      "summary": "Turn support reactions into point loads in a target model." },
+    { "id": "SectionModifier", "menu": "N. Section Modifier", "title": "Section modifier", "dll": "SectionModifierAddon.dll", "guide": "section-modifier.md", "status": "released",
+      "summary": "Set rectangular section width and depth." },
+    { "id": "ConnectionLoadExtractor", "menu": "N. Connection Load Extractor", "title": "Connection loads", "dll": "ConnectionLoadExtractorAddon.dll", "guide": "connection-loads.md", "status": "released",
+      "summary": "Extract concurrent forces and moments for governing combinations." }
+  ],
+  "rhino": { "name": "Nextra-AxisRhinoImport", "files": ["AxisBridge.rhp", "Newtonsoft.Json.dll"] }
+}

@@ -2,18 +2,18 @@
 
 Choose a tool by the task you want to perform. Select objects in AxisVM before opening its dialog.
 
-[Install the toolbox](../INSTALLATION.md) ? [Build from source](../HOW-TO-BUILD.md)
+[Install the toolbox](../INSTALLATION.md) | [Add a tool](../ADDING-A-TOOL.md) | [Build from source](../HOW-TO-BUILD.md)
 
-![Native toolbar icons and enlarged previews](../images/toolbar-icons.png)
+<!-- gen:tools-guide -->
+| | Tool | Use it for |
+|---|---|---|
+| ![Rhino import](../images/icons/RhinoImport@4x.png) | [Rhino import](rhino-import.md) | Import AxisBridge JSON geometry and structural attributes. |
+| ![One-way load panels](../images/icons/OneWayLoadPanel@4x.png) | [One-way load panels](one-way-panels.md) | Convert panels or create them from lines; choose span and edge strips. |
+| ![Load panel tools](../images/icons/LoadPanelTools@4x.png) | [Load panel tools](panel-tools.md) | Convert panel/domain, split, and merge panels. |
+| ![End pin assign](../images/icons/EndPinAssign@4x.png) | [End pin assign](end-pins.md) | Apply hinges and semi-rigid end releases. |
+| ![Reaction transfer](../images/icons/ReactionTransfer@4x.png) | [Reaction transfer](reaction-transfer.md) | Turn support reactions into point loads in a target model. |
+| ![Section modifier](../images/icons/SectionModifier@4x.png) | [Section modifier](section-modifier.md) | Set rectangular section width and depth. |
+| ![Connection loads](../images/icons/ConnectionLoadExtractor@4x.png) | [Connection loads](connection-loads.md) | Extract concurrent forces and moments for governing combinations. |
+<!-- /gen:tools-guide -->
 
-| Tool | Use it for |
-|---|---|
-| ![Rhino import](../images/RhinoImport-icon.png) [Rhino import](rhino-import.md) | Bring an AxisBridge JSON export from Rhino into the active AxisVM model. |
-| ![One-way load panels](../images/OneWayLoadPanel-icon.png) [One-way load panels](one-way-panels.md) | Choose how a panel spans and which beams receive its load. |
-| ![Load panel tools](../images/LoadPanelTools-icon.png) [Load panel tools](panel-tools.md) | Convert panels and domains, split panels, or merge adjacent panels. |
-| ![End pin assign](../images/EndPinAssign-icon.png) [End pin assign](end-pins.md) | Apply rotational hinges or semi-rigid releases at the free ends of selected chains. |
-| ![Reaction transfer](../images/ReactionTransfer-icon.png) [Reaction transfer](reaction-transfer.md) | Transfer selected support reactions into a target model as nodal point loads. |
-| ![Section modifier](../images/SectionModifier-icon.png) [Section modifier](section-modifier.md) | Set the width and/or depth of rectangular member sections. |
-| ![Connection load extractor](../images/ConnectionLoadExtractor-icon.png) [Connection load extractor](connection-loads.md) | Find critical member-end loads and keep the full concurrent force/moment vector. |
-
-A menu entry marked **(WIP)** is a tool still in development. All seven tools are currently released without the label.
+A menu entry marked **(WIP)** is a tool still in development. Released tools carry no label.

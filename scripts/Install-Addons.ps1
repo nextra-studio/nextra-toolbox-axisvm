@@ -11,8 +11,12 @@ if (-not $SourceDir) {
         Join-Path $PSScriptRoot '..\AxisVM plugin\AxisVM plugin\bin\Release'
     }
 }
-$names = @('RhinoImportAddon', 'OneWayLoadPanelAddon', 'LoadPanelToolsAddon',
-    'EndPinAssignAddon', 'ReactionTransferAddon', 'SectionModifierAddon', 'ConnectionLoadExtractorAddon')
+# The tool list comes from tools.json (next to this script in the release ZIP, one folder up in the repo),
+# so a newly registered tool is installed without editing this script.
+$registry = @((Join-Path $PSScriptRoot 'tools.json'), (Join-Path $PSScriptRoot '..	ools.json')) |
+    Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $registry) { throw 'tools.json not found next to Install-Addons.ps1.' }
+$names = @((Get-Content -LiteralPath $registry -Raw | ConvertFrom-Json).tools | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_.dll) })
 $SourceDir = (Resolve-Path -LiteralPath $SourceDir).Path
 $AddOnsDir = [System.IO.Path]::GetFullPath($AddOnsDir)
 foreach ($name in $names) {
@@ -20,7 +24,7 @@ foreach ($name in $names) {
 }
 if (Get-Process -Name 'AxisVM*' -ErrorAction SilentlyContinue) { throw 'Close AxisVM before replacing its add-ons.' }
 if ($SourceDir.TrimEnd('\') -eq $AddOnsDir.TrimEnd('\')) { throw 'Source and destination must differ.' }
-if (-not $PSCmdlet.ShouldProcess($AddOnsDir, 'Install the seven Nextra add-on DLLs, backing up existing versions')) { return }
+if (-not $PSCmdlet.ShouldProcess($AddOnsDir, "Install the $($names.Count) Nextra add-on DLLs, backing up existing versions")) { return }
 New-Item -ItemType Directory -Path $AddOnsDir -Force | Out-Null
 $backup = Join-Path $BackupRoot (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
 foreach ($name in $names) {

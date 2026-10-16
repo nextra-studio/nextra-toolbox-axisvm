@@ -49,3 +49,5 @@ scratch/
 __pycache__/
 *.py[cod]
 Checks/calibration/
+
+dist/

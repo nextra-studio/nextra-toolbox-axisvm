@@ -135,27 +135,26 @@ internal static class UiPreview
         }
     }
 
+    // One transparent PNG per tool (native 16 px and a 4x nearest-neighbour copy) so a new tool only adds files.
     private static void Icons()
     {
         string[] names = { "RhinoImport", "OneWayLoadPanel", "LoadPanelTools", "EndPinAssign", "ReactionTransfer", "SectionModifier", "ConnectionLoadExtractor" };
-        using (Bitmap sheet = new Bitmap(770, 186))
-        using (Graphics g = Graphics.FromImage(sheet))
-        using (Font font = new Font("Segoe UI", 9))
+        string folder = Path.Combine(output, "icons");
+        Directory.CreateDirectory(folder);
+        foreach (string name in names)
+        using (Bitmap icon = AddonIcons.Preview(name))
         {
-            g.Clear(Color.White);
-            for (int i = 0; i < names.Length; i++)
-            using (Bitmap icon = AddonIcons.Preview(names[i]))
+            icon.MakeTransparent(Color.Magenta);
+            icon.Save(Path.Combine(output, name + "-icon.png"), ImageFormat.Png);
+            icon.Save(Path.Combine(folder, name + ".png"), ImageFormat.Png);
+            using (Bitmap big = new Bitmap(64, 64))
+            using (Graphics g = Graphics.FromImage(big))
             {
-                icon.MakeTransparent(Color.Magenta);
-                icon.Save(Path.Combine(output, names[i] + "-icon.png"), ImageFormat.Png);
-                int x = 18 + i * 108;
-                g.DrawImageUnscaled(icon, x + 30, 12);
                 g.InterpolationMode = InterpolationMode.NearestNeighbor;
                 g.PixelOffsetMode = PixelOffsetMode.Half;
-                g.DrawImage(icon, new Rectangle(x + 6, 42, 64, 64));
-                g.DrawString(names[i].Replace("LoadPanel", "Panel\n").Replace("Connection", "Connection\n").Replace("Reaction", "Reaction\n").Replace("Section", "Section\n"), font, Brushes.Black, new RectangleF(x, 120, 104, 60));
+                g.DrawImage(icon, new Rectangle(0, 0, 64, 64));
+                big.Save(Path.Combine(folder, name + "@4x.png"), ImageFormat.Png);
             }
-            sheet.Save(Path.Combine(output, "toolbar-icons.png"), ImageFormat.Png);
         }
     }
 }

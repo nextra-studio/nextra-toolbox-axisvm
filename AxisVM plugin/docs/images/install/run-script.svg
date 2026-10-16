@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 290" width="720" height="290"><style>
+.bg{fill:#f6f8fa}.win{fill:#fff;stroke:#d0d7de;stroke-width:1.5}.bar{fill:#eaeef2}
+.t{font:600 15px Segoe UI,Helvetica,Arial,sans-serif;fill:#1f2328}
+.s{font:13px Segoe UI,Helvetica,Arial,sans-serif;fill:#57606a}
+.h{font:700 18px Segoe UI,Helvetica,Arial,sans-serif;fill:#1f2328}
+.m{font:13px Consolas,Menlo,monospace;fill:#1f2328}
+.f{fill:#fff;stroke:#d0d7de}.sel{fill:#ddf4ff}.card{fill:#fff;stroke:#d0d7de;stroke-width:1.5}
+.btn{fill:#1f883d}.bt{font:600 13px Segoe UI,Helvetica,Arial,sans-serif;fill:#fff}
+.blue{fill:#0066b4}.orange{fill:#d86712}
+.ring{fill:none;stroke:#d1242f;stroke-width:3;stroke-dasharray:6 4}
+.badge{fill:#d1242f}.bn{font:700 13px Segoe UI,Arial,sans-serif;fill:#fff}
+.arrow{fill:none;stroke:#0066b4;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.term{fill:#0d1117}.tt{font:13px Consolas,Menlo,monospace;fill:#e6edf3}
+.tg{font:13px Consolas,Menlo,monospace;fill:#3fb950}.tp{font:13px Consolas,Menlo,monospace;fill:#8b949e}
+@media (prefers-color-scheme: dark){
+.bg{fill:#0d1117}.win,.card{fill:#161b22;stroke:#3d444d}.bar{fill:#21262d}
+.t,.m,.h{fill:#e6edf3}.s{fill:#9da7b3}.f{fill:#0d1117;stroke:#3d444d}.sel{fill:#1f3a5f}
+.blue{fill:#4da3ff}.arrow{stroke:#4da3ff}}
+</style><rect class="bg" width="720" height="290" rx="12"/><rect class="term" x="20" y="16" width="680" height="240" rx="10"/><text x="40" y="48"><tspan class="tp">PS C:\Users\you\Downloads\nextra-axisvm-toolbox&gt;</tspan> <tspan class="tt">.\Install-Addons.ps1</tspan></text><text x="40" y="68"><tspan class="tg">Installed RhinoImportAddon.dll</tspan></text><text x="40" y="88"><tspan class="tg">Installed OneWayLoadPanelAddon.dll</tspan></text><text x="40" y="108"><tspan class="tg">Installed LoadPanelToolsAddon.dll</tspan></text><text x="40" y="128"><tspan class="tg">Installed EndPinAssignAddon.dll</tspan></text><text x="40" y="148"><tspan class="tg">Installed ReactionTransferAddon.dll</tspan></text><text x="40" y="168"><tspan class="tg">Installed SectionModifierAddon.dll</tspan></text><text x="40" y="188"><tspan class="tg">Installed ConnectionLoadExtractorAddon.dll</tspan></text><text x="40" y="208"><tspan class="tp">Previous versions: %LOCALAPPDATA%\NextraToolbox\backups\...</tspan></text><text x="40" y="228"><tspan class="tt">Restart AxisVM to load the updated dialogs and icons.</tspan></text><circle class="badge" cx="690" cy="22" r="11"/><text class="bn" x="690" y="26" text-anchor="middle">1</text><text class="s" x="360" y="276" text-anchor="middle">Close AxisVM first. Other AxisVM folder: add  -AddOnsDir "D:\AxisVM X8\AddOns"</text></svg>

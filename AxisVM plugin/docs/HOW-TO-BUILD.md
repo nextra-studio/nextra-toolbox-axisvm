@@ -28,6 +28,8 @@ Required references (found in `C:\AXISVM X8`):
 
 ## 3. Create a new add-on
 
+(After the code works, register it in `tools.json` and follow [ADDING-A-TOOL.md](ADDING-A-TOOL.md) for icon, docs and release.)
+
 1. Copy an existing small add-on as a template (e.g. `SectionModifierAddon.csproj` + its `Addons/`,
    `UI/`, `Functions/` files).
 2. In the new `.csproj` change `<ProjectGuid>` (new GUID), `<AssemblyName>`, and the `<Compile Include>` list.
