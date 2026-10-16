@@ -34,10 +34,10 @@ AxisVM plugin/                      <- AxisVM sources (repository root is one le
 | N. Rhino Import | RhinoImportAddon | [Rhino Import guide](docs/user-guide/rhino-import.md) |
 | N. One-Way Load Panel (selected panels -> one-way, or lines -> new panels) | OneWayLoadPanelAddon | [docs/addons/OneWayLoadPanelAddon.md](docs/addons/OneWayLoadPanelAddon.md) |
 | N. Load Panel Tools | LoadPanelToolsAddon | [docs/addons/LoadPanelToolsAddon.md](docs/addons/LoadPanelToolsAddon.md) |
-| N. End Pin Assign (WIP) | EndPinAssignAddon | [docs/addons/EndPinAssignAddon.md](docs/addons/EndPinAssignAddon.md) |
-| N. Reaction Transfer (WIP) | ReactionTransferAddon | [docs/addons/ReactionTransferAddon.md](docs/addons/ReactionTransferAddon.md) |
-| N. Section Modifier (WIP) | SectionModifierAddon | [docs/addons/SectionModifierAddon.md](docs/addons/SectionModifierAddon.md) |
-| N. Connection Load Extractor (WIP) | ConnectionLoadExtractorAddon | [docs/addons/ConnectionLoadExtractorAddon.md](docs/addons/ConnectionLoadExtractorAddon.md) |
+| N. End Pin Assign | EndPinAssignAddon | [docs/addons/EndPinAssignAddon.md](docs/addons/EndPinAssignAddon.md) |
+| N. Reaction Transfer | ReactionTransferAddon | [docs/addons/ReactionTransferAddon.md](docs/addons/ReactionTransferAddon.md) |
+| N. Section Modifier | SectionModifierAddon | [docs/addons/SectionModifierAddon.md](docs/addons/SectionModifierAddon.md) |
+| N. Connection Load Extractor | ConnectionLoadExtractorAddon | [docs/addons/ConnectionLoadExtractorAddon.md](docs/addons/ConnectionLoadExtractorAddon.md) |
 
 ## Quick start
 

@@ -7,7 +7,7 @@
 ## Steps
 
 1. Save and calculate the source model. Select the supports/nodes and geometry needed in the target.
-2. Open N. Reaction Transfer (WIP). Choose Create New File or Modify Existing File, then Browse for the target path.
+2. Open N. Reaction Transfer. Choose Create New File or Modify Existing File, then Browse for the target path.
 3. Choose linear, non-linear or envelope results. For envelopes, choose a component and Min/Max.
 4. For a new file choose whether to keep supports. For an existing file set the node-match tolerance. Press Transfer and review the confirmation and report.
 

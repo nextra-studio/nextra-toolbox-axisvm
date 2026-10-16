@@ -7,7 +7,7 @@
 ## Steps
 
 1. Calculate the load combinations. Select the beams/ribs, optionally also the nodes whose member ends you need. With no selected nodes, both ends are included.
-2. Open N. Connection Load Extractor (WIP), tick the combinations and choose linear/non-linear results and local/global axes.
+2. Open N. Connection Load Extractor, tick the combinations and choose linear/non-linear results and local/global axes.
 3. Press Extract. Read Summary, the six component tabs, All and Checks. Each critical row includes its combination and concurrent six-component vector.
 4. Use Export all or Export critical for CSV, Copy tab for TSV, or Select in model to highlight the rows. The result window stays open while you inspect AxisVM.
 

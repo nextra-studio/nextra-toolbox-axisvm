@@ -10,7 +10,7 @@ those axes it also finds the **critical** load combinations: the most positive (
 value, per member end and over all reported ends. Both the full table and the critical table can be exported for
 connection design.
 
-Menu: **N. Connection Load Extractor (WIP)**. The addon does not edit the model. The only thing it changes is the
+Menu: **N. Connection Load Extractor**. The addon does not edit the model. The only thing it changes is the
 selection, and only when you press "Select in model".
 
 ## Workflow & Logic
@@ -109,7 +109,7 @@ Checks\bin\Debug\ConnectionLoadMathChecks.exe      (exit code 0 = all passed)
    each component is reported as `same` / `negated` / `DIFFERENT`, separately for start ends and end ends. `DIFFERENT`
    means the wrong section was picked. The same/negated pattern shows the convention AxisVM's own node table uses.
 
-## Verification in AxisVM (do this before removing "(WIP)")
+## Verification in AxisVM (do this before removing "")
 1. **Calibration (sign table)**: a cantilever along global X, fixed at node 1, with one combination per tip load:
    +Fx, +Fy, +Fz, +Mx, +My, +Mz. Select the beam and node 1 and run with output Global. The force on node 1 must equal
    **−(support reaction)** in AxisVM's reaction table, for all six components. Repeat with the beam drawn in the

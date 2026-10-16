@@ -16,4 +16,4 @@ Choose a tool by the task you want to perform. Select objects in AxisVM before o
 | ![Section modifier](../images/SectionModifier-icon.png) [Section modifier](section-modifier.md) | Set the width and/or depth of rectangular member sections. |
 | ![Connection load extractor](../images/ConnectionLoadExtractor-icon.png) [Connection load extractor](connection-loads.md) | Find critical member-end loads and keep the full concurrent force/moment vector. |
 
-The four menu entries marked **WIP** keep their existing status. This update changes presentation, not the structural algorithms.
+A menu entry marked **(WIP)** is a tool still in development. All seven tools are currently released without the label.

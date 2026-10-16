@@ -7,7 +7,7 @@
 ## Steps
 
 1. Select the target beam, rib or truss lines, or their members.
-2. Open N. Section Modifier (WIP). Tick Modify Width and/or Modify Depth.
+2. Open N. Section Modifier. Tick Modify Width and/or Modify Depth.
 3. Enter the new dimension in millimetres. An unticked dimension is retained according to the existing section-name convention.
 4. Press OK and review the modified count. Inspect the assigned sections in AxisVM.
 

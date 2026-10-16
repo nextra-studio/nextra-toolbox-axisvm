@@ -15,11 +15,11 @@ namespace AxisVM_plugin.Addons
         public int AxisVMMainFormHandle { get; set; }
         public int AxisVMApplicationHandle { get; set; }
 
-        public string Plugin_MenuItemText { get { return "N. End Pin Assign   (WIP)"; } }
+        public string Plugin_MenuItemText { get { return "N. End Pin Assign"; } }
 
         public string Plugin_GetTranslatedMenuItemText(int PrgLang)
         {
-            return "N. End Pin Assign  (WIP)";
+            return "N. End Pin Assign";
         }
 
         public int Plugin_IsMenuItemEnabled(object iAxisVMApp) { return 1; }
@@ -42,7 +42,7 @@ namespace AxisVM_plugin.Addons
 
         // Addon methods (toolbar)
         public string Addon_HintText { get { return "Assign end pins to selected lines"; } }
-        public string Addon_GetTranslatedHintText(int PrgLang) { return "N. End Pin Assign  (WIP)"; }
+        public string Addon_GetTranslatedHintText(int PrgLang) { return "N. End Pin Assign"; }
         public int Addon_IsItemEnabled(object iAxisVMApp) { return 1; }
         public int Addon_IsItemVisible(object iAxisVMApp) { return 1; }
         public int Addon_IsModalWindow { get { return 0; } }

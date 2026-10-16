@@ -6,7 +6,7 @@
 
 ## Steps
 
-1. Select the beam or rib chains, then open N. End Pin Assign (WIP).
+1. Select the beam or rib chains, then open N. End Pin Assign.
 2. Choose Complete Pin or Semi-rigid Pin. For semi-rigid pins, enter the rotational stiffness in kNm/rad.
 3. Choose both chain ends, the chain start or the chain end. Enter the continuity angle tolerance.
 4. Review **Modify intermediate releases** (enabled by default). Enabled: every selected beam/rib is first made fully fixed at both ends, then only the chosen chain ends get the pin. Disabled: existing releases are kept (pins stay pins) and only the chosen chain ends are added or changed.
