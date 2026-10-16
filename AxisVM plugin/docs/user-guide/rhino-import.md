@@ -19,6 +19,8 @@ See the [Rhino commands guide](rhino-commands.md) for every Ax command with scre
 
 The screenshot is an offline preview with synthetic inputs. It is not a model-analysis result.
 
+**Export catalog for Rhino** writes this AxisVM's Eurocode materials and cross-section tables to `%APPDATA%\AxisBridge`, for *AxLibrary > From AxisVM catalog* in Rhino. It only reads the catalog; the model is not changed. Run it once per computer and again after an AxisVM update.
+
 ## Existing behavior to know
 
 Coordinates and attributes are interpreted using the chosen units. AxisBridge dialogs write load attributes in kN-based units; choose N, mm only for manually entered attributes in those units. This dialog has no overwrite/replace mode: inspect the report after a repeat import.

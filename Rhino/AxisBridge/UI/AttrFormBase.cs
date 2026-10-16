@@ -175,7 +175,7 @@ namespace AxisBridge.UI
         /// <summary>Closes the dialog to pick surfaces; their ids are handed to <paramref name="onPicked"/>.</summary>
         protected void RequestSurfacePick(string prompt, Action<List<Guid>> onPicked)
         {
-            RequestPick(prompt, Rhino.DocObjects.ObjectType.Surface | Rhino.DocObjects.ObjectType.Brep | Rhino.DocObjects.ObjectType.Curve, onPicked);
+            RequestPick(prompt, Rhino.DocObjects.ObjectType.Surface | Rhino.DocObjects.ObjectType.Brep | Rhino.DocObjects.ObjectType.Mesh | Rhino.DocObjects.ObjectType.Curve, onPicked);
         }
 
         /// <summary>Closes the dialog to pick a direction from two points (the dialog comes back afterwards).</summary>

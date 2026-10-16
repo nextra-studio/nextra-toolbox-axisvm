@@ -27,6 +27,18 @@ namespace AxisVM_plugin.Core
 
         /// <summary>Where the JSON came from, used to place the id-map sidecar if one is needed.</summary>
         public string SourcePath = "";
+
+        /// <summary>
+        /// Update an earlier import of the same file: first delete everything it created (found by the
+        /// RhinoLink mark, see AxisModelBuilder.Link.cs), then build as usual.
+        /// </summary>
+        public bool ReplacePrevious;
+
+        /// <summary>
+        /// Live link only: every Rhino object id the incoming Rhino model knows (LinkFile.RhinoKnownGuids).
+        /// Entities "Send to Rhino" adopted are replaced only when Rhino knows what they became; null keeps them all.
+        /// </summary>
+        public HashSet<string> RhinoKnownGuids;
     }
 
     /// <summary>Counters for the run summary.</summary>
@@ -50,6 +62,9 @@ namespace AxisVM_plugin.Core
         public int PartsCreated;
         public int AttributeErrors;
         public int MembersAssembled;
+
+        /// <summary>What an earlier import of the same file had created and this one replaced (null = no update).</summary>
+        public LinkedItems Replaced;
     }
 
     /// <summary>
@@ -239,8 +254,11 @@ namespace AxisVM_plugin.Core
             ValidateAttributeNames();
             PrepareJobs();
 
+            if (opt.ReplacePrevious) RemovePrevious();
+
             if (!opt.DryRun)
             {
+                CaptureBefore();
                 int n = SafeLineCount();
                 for (int i = 1; i <= n; i++)
                 {
@@ -267,6 +285,7 @@ namespace AxisVM_plugin.Core
             BuildLoads();
             BuildParts();
             StampRhinoIds();
+            MarkCreated();
         }
 
         /// <summary>
@@ -598,13 +617,40 @@ namespace AxisVM_plugin.Core
             return bl;
         }
 
+        /// <summary>
+        /// Whether the arc AxisVM holds for this line passes through <paramref name="mid"/>. The middle of
+        /// the arc is computed from its own centre, normal and sweep (the start node turned by half the
+        /// sweep about the normal): IAxisVMLine.GetMidPoint returns (0,0,0) for arcs in AxisVM 18 r1o, which
+        /// made every correct arc look wrong.
+        /// </summary>
         private bool ArcMatches(int lineId, double[] mid)
         {
             try
             {
-                RPoint3d p = new RPoint3d();
-                model.Lines.Item[lineId].GetMidPoint(ref p);
-                return Dist(new[] { p.x, p.y, p.z }, mid) <= Math.Max(opt.MergeToleranceM * 10, 1e-3);
+                IAxisVMLine line = model.Lines.Item[lineId];
+                RLineGeomData g = new RLineGeomData();
+                line.GetGeomData(ref g);
+                RPoint3d start = new RPoint3d();
+                model.Nodes.GetNodeCoord(Math.Abs(line.StartNode), ref start);
+
+                double[] c = { g.CircleArc.Center.x, g.CircleArc.Center.y, g.CircleArc.Center.z };
+                double[] n = { g.CircleArc.NormalVector.x, g.CircleArc.NormalVector.y, g.CircleArc.NormalVector.z };
+                double len = Math.Sqrt(Dot(n, n));
+                if (len < 1e-12) return true;   // cannot verify - trust the computed data
+                n = new[] { n[0] / len, n[1] / len, n[2] / len };
+
+                // Rodrigues: v turned by half the sweep about n.
+                double[] v = Sub(new[] { start.x, start.y, start.z }, c);
+                double half = g.CircleArc.Alfa / 2.0, cos = Math.Cos(half), sin = Math.Sin(half);
+                double[] nv = Cross(n, v);
+                double nd = Dot(n, v);
+                double[] m = new[]
+                {
+                    c[0] + v[0] * cos + nv[0] * sin + n[0] * nd * (1 - cos),
+                    c[1] + v[1] * cos + nv[1] * sin + n[1] * nd * (1 - cos),
+                    c[2] + v[2] * cos + nv[2] * sin + n[2] * nd * (1 - cos)
+                };
+                return Dist(m, mid) <= Math.Max(opt.MergeToleranceM * 10, 1e-3);
             }
             catch { return true; }   // cannot verify - trust the computed data
         }

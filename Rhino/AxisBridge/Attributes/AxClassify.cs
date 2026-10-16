@@ -40,7 +40,7 @@ namespace AxisBridge.Attributes
 
             if (geom is Point) return AxGeomKind.Point;
 
-            if (geom is Brep || geom is Surface || geom is Extrusion ||
+            if (geom is Brep || geom is Surface || geom is Extrusion || geom is Mesh ||
                 (geom is Curve c && c.IsClosed && attrs != null && attrs.ContainsKey(AxKeys.FeType)))
                 return AxGeomKind.Domain;
 
@@ -108,6 +108,11 @@ namespace AxisBridge.Attributes
                     Brep sb = s.ToBrep();
                     var amp = sb != null ? AreaMassProperties.Compute(sb) : null;
                     return amp != null ? amp.Centroid : s.GetBoundingBox(true).Center;
+                }
+                case Mesh m:
+                {
+                    var amp = AreaMassProperties.Compute(m);
+                    return amp != null ? amp.Centroid : m.GetBoundingBox(true).Center;
                 }
                 default:
                     return geom?.GetBoundingBox(true).Center ?? Point3d.Origin;

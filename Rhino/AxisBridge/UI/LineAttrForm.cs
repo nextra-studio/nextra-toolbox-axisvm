@@ -34,6 +34,7 @@ namespace AxisBridge.UI
         private readonly SupportField support;
         private readonly TextField parts;
 
+        private readonly Button stiffPresets;
         private readonly TabPage pageMember, pageLink, pageSupport, pageLoads, pageParts;
         private readonly FieldPage.Row rowRelease, rowAxis, rowEcc, rowStiff, rowCoupled, rowHinge, rowRigidNote, rowSpringNote;
 
@@ -46,6 +47,7 @@ namespace AxisBridge.UI
             { AxSchema.Beam, "IPE300" }, { AxSchema.Rib, "300x500" }, { AxSchema.Truss, "CHS168.3x8" }
         };
         private const string DefaultStiffness = "1e6,1e6,1e6,0,0,0";
+        private const string DefaultHingeStiffness = Commands.EdgeHinges.LineHingeStiffness;
         private const string DefaultCoupled = "1,1,1,1,1,1";
 
         public LineAttrForm(SelectionState state, AxLibrary library, RhinoDoc doc)
@@ -78,19 +80,29 @@ namespace AxisBridge.UI
             link.Section("Spring, link and edge hinge");
             rowSpringNote = link.AddWide(Theme.Hint("Spring element between the two curve end points (global directions)."));
             stiffness = Track(new TextField(AxKeys.Stiffness, "kx, ky, kz, kxx, kyy, kzz"));
-            rowStiff = link.Add("Stiffness", stiffness.Control, "6 values: kN/m for translations, kNm/rad for rotations (edge hinge: per metre). 0 = free.");
+            stiffPresets = new Button { Text = "Presets...", AutoSize = true, Height = 25 };
+            var presetMenu = new ContextMenuStrip();
+            presetMenu.Items.Add("Line hinge - rotation about the edge free", null, (s, e) => stiffness.Assign(DefaultHingeStiffness));
+            presetMenu.Items.Add("All rotations free, translations fixed", null, (s, e) => stiffness.Assign("1e10,1e10,1e10,0,0,0"));
+            presetMenu.Items.Add("Semi-rigid about the edge (then edit kxx)", null, (s, e) => stiffness.Assign("1e10,1e10,1e10,5000,1e10,1e10"));
+            stiffPresets.Click += (s, e) => presetMenu.Show(stiffPresets, 0, stiffPresets.Height);
+            rowStiff = link.Add("Stiffness", stiffness.Control,
+                "6 values: kN/m for translations, kNm/rad for rotations. Edge hinge: per metre, local x along the edge, 1e10 = rigid. 0 = free.", stiffPresets);
             coupled = Track(new TextField(AxKeys.CoupledDof, "x, y, z, xx, yy, zz"));
             rowCoupled = link.Add("Coupled DOFs", coupled.Control, "6 flags, 1 = coupled (rigid), 0 = free. E.g. 1,1,1,0,0,0 couples translations only.");
 
             hingeDomains = Track(new TextField(AxKeys.HingeDomains, "Auto - every domain sharing this edge"));
             var pick = new Button { Text = "Pick...", AutoSize = true, Height = 25 };
-            pick.Click += (s, e) => RequestSurfacePick("Select the domains this edge hinge releases (Enter when done)", ids =>
+            pick.Click += (s, e) =>
             {
-                var parts = new List<string>();
-                foreach (Guid g in ids) parts.Add(g.ToString());
-                hingeDomains.Assign(string.Join("; ", parts.ToArray()));
-            });
-            rowHinge = link.Add("Hinged domains", hingeDomains.Control, "Leave blank to release every domain whose edge runs along this line, or Pick specific surfaces.", pick);
+                PendingPick = d =>
+                {
+                    List<string> ids = Commands.EdgeHinges.PickDomains(d, "Select the domains this edge hinge releases - a single face of a polysurface may be picked (Enter when done)");
+                    if (ids != null) hingeDomains.Assign(string.Join("; ", ids.ToArray()));
+                };
+                DialogResult = DialogResult.Retry;
+            };
+            rowHinge = link.Add("Hinged domains", hingeDomains.Control, "Leave blank to release every domain whose edge runs along this line, or Pick specific surfaces / polysurface faces.", pick);
             rowRigidNote = link.AddWide(Theme.Hint("A rigid link is created as an AxisVM rigid body: both end nodes move together as one rigid element. It needs no further input."));
             pageLink = AddPage("Spring / link", link);
 
@@ -141,7 +153,7 @@ namespace AxisBridge.UI
             release.Load(State.Get(AxKeys.Release), typeNow == AxSchema.Truss ? "" : "fix", fresh);
             localAxis.Load(State.Get(AxKeys.LocalAxis), "", fresh);
             eccentricity.Load(State.Get(AxKeys.Eccentricity), "", fresh);
-            stiffness.Load(State.Get(AxKeys.Stiffness), typeNow == AxSchema.Spring || typeNow == AxSchema.EdgeHinge ? DefaultStiffness : "", fresh);
+            stiffness.Load(State.Get(AxKeys.Stiffness), typeNow == AxSchema.Spring ? DefaultStiffness : typeNow == AxSchema.EdgeHinge ? DefaultHingeStiffness : "", fresh);
             coupled.Load(State.Get(AxKeys.CoupledDof), typeNow == AxSchema.NodeLink ? DefaultCoupled : "", fresh);
             hingeDomains.Load(State.Get(AxKeys.HingeDomains), "", fresh);
             support.Load(State.Get(AxKeys.Support), "", fresh);
@@ -166,8 +178,14 @@ namespace AxisBridge.UI
             SwapDefault(material, DefaultMaterial, t);
             SwapDefault(section, DefaultSection, t);
 
-            if ((t == AxSchema.Spring || t == AxSchema.EdgeHinge) && !stiffness.ShowsVaries && (stiffness.Value.Length == 0 || !stiffness.Touched))
-                stiffness.Assign(stiffness.Value.Length == 0 ? DefaultStiffness : stiffness.Value);
+            if ((t == AxSchema.Spring || t == AxSchema.EdgeHinge) && !stiffness.ShowsVaries)
+            {
+                // Swap spring <-> hinge defaults; a stiffness the user typed is kept.
+                string want = t == AxSchema.Spring ? DefaultStiffness : DefaultHingeStiffness;
+                string have = stiffness.Value;
+                if (have.Length == 0 || have == DefaultStiffness || have == DefaultHingeStiffness) stiffness.Assign(want);
+                else if (!stiffness.Touched) stiffness.Assign(have);
+            }
             if (t == AxSchema.NodeLink && !coupled.ShowsVaries && (coupled.Value.Length == 0 || !coupled.Touched))
                 coupled.Assign(coupled.Value.Length == 0 ? DefaultCoupled : coupled.Value);
             // Profile fields become relevant after a type change: make sure their shown values get written.
@@ -204,6 +222,7 @@ namespace AxisBridge.UI
             rowEcc.Visible = bending;
             rowSpringNote.Visible = spring;
             rowStiff.Visible = spring || hinge;
+            stiffPresets.Visible = hinge;
             rowCoupled.Visible = nodeLink;
             rowHinge.Visible = hinge;
             rowRigidNote.Visible = rigid;

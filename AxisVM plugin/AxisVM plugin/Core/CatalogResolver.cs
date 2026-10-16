@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using AxisVM;
@@ -206,7 +207,8 @@ namespace AxisVM_plugin.Core
         /// <summary>
         /// Resolves a cross-section name, in this order:
         ///   1. already in the model (ignoring spaces/case),
-        ///   2. defined in the Rhino library (catalog or parametric shape),
+        ///   2. defined in the Rhino library: a profile picked from the AxisVM catalog (AxLoadLib) is added
+        ///      from its own table, a parametric shape is built from its dimensions,
         ///   3. a "300x500" style rectangle,
         ///   4. the AxisVM profile catalogs under any spelling variant (IPE300, HEA 200...),
         ///   5. a parametric CHS / SHS / RHS / D (circle) built from the numbers in the name,
@@ -223,10 +225,17 @@ namespace AxisVM_plugin.Core
 
             if (key.Length > 0)
             {
-                id = FindSectionInModel(key);
-
                 RhinoLibSection lib = library.FindSection(key);
-                if (id <= 0 && lib != null && !string.Equals(lib.Shape, "Catalog", StringComparison.OrdinalIgnoreCase))
+                bool libCatalog = lib != null && string.Equals(lib.Shape, "Catalog", StringComparison.OrdinalIgnoreCase);
+                bool picked = libCatalog && (lib.CatalogFile.Length > 0 || lib.CatalogShape > 0);
+
+                // A profile picked from the catalog is matched by its exact name: AxisVM has entries that
+                // differ only in spacing ("IPE 80" / "IPE  80") and they are different profiles.
+                id = picked ? FindSectionExact(lib.CatalogName.Length > 0 ? lib.CatalogName : lib.Name, lib.Name) : FindSectionInModel(key);
+
+                if (id <= 0 && picked)
+                    id = FromLibraryCatalog(lib);
+                if (id <= 0 && lib != null && !libCatalog)
                     id = CreateLibrarySection(lib);
 
                 if (id <= 0)
@@ -268,15 +277,41 @@ namespace AxisVM_plugin.Core
             catch { }
 
             string want = Compact(name);
+            List<string> names = SectionNames();
+            for (int i = 0; i < names.Count; i++)
+                if (names[i] != null && Compact(names[i]) == want) return i + 1;
+            return 0;
+        }
+
+        /// <summary>A section whose name is exactly one of <paramref name="names"/> (case and spacing count).</summary>
+        private int FindSectionExact(params string[] names)
+        {
+            List<string> all = SectionNames();
+            foreach (string want in names)
+                for (int i = 0; i < all.Count; i++)
+                    if (all[i] == want) return i + 1;
+            return 0;
+        }
+
+        private readonly List<string> sectionNames = new List<string>();
+
+        /// <summary>
+        /// Names of the model's cross-sections (index = id - 1). Reading one name is a COM round trip that
+        /// creates a section object, so each is read once and only new sections are read on later calls -
+        /// rescanning every name for every lookup made a large import quadratic.
+        /// </summary>
+        private List<string> SectionNames()
+        {
             int count = 0;
             try { count = model.CrossSections.Count; } catch { }
-            for (int i = 1; i <= count; i++)
+            if (count < sectionNames.Count) sectionNames.Clear();   // sections were deleted: start over
+            for (int i = sectionNames.Count + 1; i <= count; i++)
             {
                 string n;
-                try { n = model.CrossSections.Item[i].Name; } catch { continue; }
-                if (Compact(n) == want) return i;
+                try { n = model.CrossSections.Item[i].Name; } catch { n = null; }
+                sectionNames.Add(n);
             }
-            return 0;
+            return sectionNames;
         }
 
         private int FromCatalog(string key)
@@ -300,6 +335,97 @@ namespace AxisVM_plugin.Core
                 }
             }
             return 0;
+        }
+
+        /// <summary>
+        /// Adds a profile the Rhino library took from the AxisVM catalog: from its own table file first (so
+        /// "L 250x28" comes from the table that was picked, not another table with the same name), then by
+        /// shape and name when that file is not found in this AxisVM installation.
+        /// </summary>
+        private int FromLibraryCatalog(RhinoLibSection s)
+        {
+            // The catalog's own spelling first (some tables pad names with spaces), then the library name.
+            var names = new List<string>();
+            if (!string.IsNullOrEmpty(s.CatalogName)) names.Add(s.CatalogName);
+            if (!names.Contains(s.Name)) names.Add(s.Name);
+
+            int id = 0;
+            string path = CatalogFilePath(s.CatalogFile);
+            if (path != null)
+            {
+                foreach (string n in names)
+                {
+                    try { id = model.CrossSections.AddFromCatalogFile(path, n); } catch { id = 0; }
+                    if (id > 0)
+                    {
+                        notes.Add(string.Format("Cross-section '{0}' was added from the AxisVM catalog table '{1}'.", s.Name,
+                            s.CatalogTable.Length > 0 ? s.CatalogTable : s.CatalogFile));
+                        return id;
+                    }
+                }
+            }
+
+            if (s.CatalogShape > 0)
+            {
+                foreach (string n in names)
+                {
+                    try { id = model.CrossSections.AddFromCatalog_V161((ECrossSectionShapeEx)s.CatalogShape, n); } catch { id = 0; }
+                    if (id > 0)
+                    {
+                        notes.Add(string.Format("Cross-section '{0}' was added from the AxisVM catalog{1}.", s.Name,
+                            s.CatalogFile.Length > 0 ? " (table file '" + s.CatalogFile + "' not found, matched by shape and name)" : ""));
+                        return id;
+                    }
+                }
+            }
+            return 0;
+        }
+
+        private static string catalogFolder;
+
+        /// <summary>Full path of an AxisVM catalog file ("HEA_PL" -> "C:\AXISVM X8\HEA_PL.SEC"), or null when not found.</summary>
+        public static string CatalogFilePath(string file)
+        {
+            if (string.IsNullOrEmpty(file)) return null;
+            string name = Path.GetExtension(file).Length > 0 ? file : file + ".SEC";
+            if (Path.IsPathRooted(name)) return File.Exists(name) ? name : null;
+
+            if (catalogFolder != null)
+            {
+                string p = Path.Combine(catalogFolder, name);
+                if (File.Exists(p)) return p;
+            }
+            foreach (string dir in AxisVMFolders())
+            {
+                if (string.IsNullOrEmpty(dir)) continue;
+                string p = Path.Combine(dir, name);
+                if (File.Exists(p)) { catalogFolder = dir; return p; }
+            }
+            return null;
+        }
+
+        /// <summary>Where the catalog files can be: the running AxisVM, the folder above AddOns, the registered COM server.</summary>
+        private static List<string> AxisVMFolders()
+        {
+            var dirs = new List<string>();
+            try { dirs.Add(Path.GetDirectoryName(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName)); } catch { }
+            try { dirs.Add(Path.GetDirectoryName(Path.GetDirectoryName(typeof(CatalogResolver).Assembly.Location))); } catch { }
+            try
+            {
+                using (Microsoft.Win32.RegistryKey clsid = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(@"AxisVM.AxisVMApplication\CLSID"))
+                {
+                    string id = clsid == null ? null : clsid.GetValue("") as string;
+                    if (!string.IsNullOrEmpty(id))
+                        using (Microsoft.Win32.RegistryKey server = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(@"CLSID\" + id + @"\LocalServer32"))
+                        {
+                            string exe = server == null ? null : server.GetValue("") as string;
+                            if (!string.IsNullOrEmpty(exe)) dirs.Add(Path.GetDirectoryName(exe.Trim().Trim('"').Split(new[] { " /", " -" }, StringSplitOptions.None)[0]));
+                        }
+                }
+            }
+            catch { }
+            dirs.Add(@"C:\AXISVM X8");
+            return dirs;
         }
 
         /// <summary>Creates a parametric section exactly as defined in the Rhino library (dimensions in mm).</summary>

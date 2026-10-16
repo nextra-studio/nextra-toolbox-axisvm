@@ -94,63 +94,76 @@ namespace AxisVM_plugin.Core
         // 4h - Rhino id stamping
         // ==================================================================
 
+        public const string GuidAttachment = LinkState.Guid;
+
         private bool attachmentsWork = true;
         private readonly List<string> idMap = new List<string>();
 
         /// <summary>
         /// Records which Rhino object each AxisVM entity came from (attachment "RhinoGuid", or a
-        /// sidecar file beside the JSON when the AxisVM build does not keep attachments).
+        /// sidecar file beside the JSON when the AxisVM build does not keep attachments). Curves drawn on
+        /// top of each other share AxisVM lines, so a line keeps every owner, ";"-joined.
         /// </summary>
         private void StampRhinoIds()
         {
             if (opt.DryRun) return;
 
+            Dictionary<int, List<string>> nodeOwners = new Dictionary<int, List<string>>();
             foreach (RhinoPoint p in rhino.Points)
             {
                 int nodeId = LiveNode(M(p.Xyz));
                 if (nodeId <= 0) continue;
-                idMap.Add(string.Format("point\t{0}\t{1}", p.Guid, nodeId));
-                Stamp(() => model.Nodes.Attachments, nodeId, p.Guid);
+                idMap.Add(string.Format("point	{0}	{1}", p.Guid, nodeId));
+                Own(nodeOwners, nodeId, p.Guid);
             }
 
+            Dictionary<int, List<string>> lineOwners = new Dictionary<int, List<string>>();
             foreach (LineJob job in lineJobs)
                 foreach (int id in job.Chain.Ids())
                 {
-                    idMap.Add(string.Format("line\t{0}\t{1}", job.Src.Guid, id));
-                    Stamp(() => model.Lines.Attachments, id, job.Src.Guid);
+                    idMap.Add(string.Format("line	{0}	{1}", job.Src.Guid, id));
+                    Own(lineOwners, id, job.Src.Guid);
                 }
+
+            foreach (KeyValuePair<int, List<string>> kv in nodeOwners) Stamp(() => model.Nodes.Attachments, kv.Key, string.Join(";", kv.Value));
+            foreach (KeyValuePair<int, List<string>> kv in lineOwners) Stamp(() => model.Lines.Attachments, kv.Key, string.Join(";", kv.Value));
 
             foreach (SurfaceJob s in surfaceJobs)
             {
                 if (s.DomainId > 0)
                 {
-                    idMap.Add(string.Format("domain\t{0}\t{1}", s.Src.Guid, s.DomainId));
+                    idMap.Add(string.Format("domain	{0}	{1}", s.Src.Guid, s.DomainId));
                     Stamp(() => model.Domains.Attachments, s.DomainId, s.Src.Guid);
                 }
-                foreach (int pid in s.PanelIds) idMap.Add(string.Format("loadpanel\t{0}\t{1}", s.Src.Guid, pid));
+                foreach (int pid in s.PanelIds) idMap.Add(string.Format("loadpanel	{0}	{1}", s.Src.Guid, pid));
             }
 
             if (!attachmentsWork) WriteSidecar();
         }
 
-        private void Stamp(Func<AxisVMAttachments> getAttachments, int itemIndex, string guid)
+        private static void Own(Dictionary<int, List<string>> owners, int id, string guid)
         {
-            if (!attachmentsWork || string.IsNullOrEmpty(guid)) return;
+            if (string.IsNullOrEmpty(guid)) return;
+            List<string> list;
+            if (!owners.TryGetValue(id, out list)) { list = new List<string>(); owners[id] = list; }
+            if (!list.Contains(guid)) list.Add(guid);
+        }
+
+        private void Stamp(Func<AxisVMAttachments> getAttachments, int itemIndex, string guids)
+        {
+            if (!attachmentsWork || string.IsNullOrEmpty(guids)) return;
+            string error = null;
             try
             {
-                AxisVMAttachments attachments = getAttachments();
-                if (attachments == null) return;
-
-                byte[] payload = Encoding.UTF8.GetBytes(guid);
-                Array data = Array.CreateInstance(typeof(byte), new[] { payload.Length }, new[] { 1 });
-                for (int i = 0; i < payload.Length; i++) data.SetValue(payload[i], i + 1);
-                attachments.AddData("RhinoGuid", itemIndex, data);
+                if (!LinkState.Write(getAttachments(), GuidAttachment, itemIndex, guids)) error = "AxisVM refused the attachment";
             }
-            catch (Exception ex)
+            catch (Exception ex) { error = ex.Message; }
+
+            if (error != null)
             {
                 // One failure means the mechanism is unavailable in this AxisVM build - stop trying.
                 attachmentsWork = false;
-                notes.Add("Rhino ids could not be attached to the AxisVM entities (" + ex.Message + "), so they were written to a sidecar file instead.");
+                notes.Add("Rhino ids could not be attached to the AxisVM entities (" + error + "), so they were written to a sidecar file instead.");
             }
         }
 

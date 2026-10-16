@@ -67,6 +67,7 @@
     <Compile Include="Attributes\AxSchema.cs" />
     <Compile Include="Attributes\SelectionState.cs" />
     <Compile Include="Library\AxLibrary.cs" />
+    <Compile Include="Library\AxCatalog.cs" />
     <Compile Include="Loads\LoadRow.cs" />
     <Compile Include="UI\Theme.cs" />
     <Compile Include="UI\Fields.cs" />
@@ -76,23 +77,27 @@
     <Compile Include="UI\AttrFormBase.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="UI\CatalogPickerForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="UI\LibraryForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Commands\AttrCommandRunner.cs" />
     <Compile Include="Commands\AxLibraryCommand.cs" />
-    <Compile Include="Commands\AxEdgeHingeCommand.cs" />
+    <Compile Include="Commands\EdgeHinges.cs" />
     <Compile Include="Loads\SpanTools.cs" />
     <Compile Include="UI\PanelFields.cs" />
     <Compile Include="UI\PanelPreview.cs" />
-    <Compile Include="UI\EdgeHingeForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
     <Compile Include="Layers\AxLayers.cs" />
     <Compile Include="Export\ExportDto.cs" />
     <Compile Include="Export\GeometryFlattener.cs" />
     <Compile Include="Export\ModelExporter.cs" />
     <Compile Include="Visualize\TagBuilder.cs" />
+    <Compile Include="Visualize\AxVisualConduit.cs" />
+    <Compile Include="UI\VisualizeForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="UI\PointAttrForm.cs" />
     <Compile Include="UI\LineAttrForm.cs" />
     <Compile Include="UI\DomainAttrForm.cs" />
@@ -104,6 +109,11 @@
     <Compile Include="Commands\AxUpdateGuidCommand.cs" />
     <Compile Include="Commands\AxVisualizeCommand.cs" />
     <Compile Include="Commands\AxLayerTidyUpCommand.cs" />
+    <Compile Include="Commands\AxLinkCommand.cs" />
+    <Compile Include="Link\AxLinkSync.cs" />
+    <Compile Include="UI\LinkForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

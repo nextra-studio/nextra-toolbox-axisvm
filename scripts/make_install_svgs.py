@@ -209,7 +209,7 @@ svg("axisvm-tools.svg", 720, h, body.replace("Seven tools", "%d tools" % rows))
 
 # Rhino pictures (written to docs/images/rhino/) -----------------------------------------------------------
 OUT = OUT.parent / "rhino"
-cmds = ["AxPoint", "AxLine", "AxDomain", "AxLibrary", "AxEdgeHinge", "AxVisualize", "AxClear", "AxUpdateGuid", "AxLayerTidyUp", "AxExport"]
+cmds = ["AxPoint", "AxLine", "AxDomain", "AxLibrary", "AxVisualize", "AxClear", "AxUpdateGuid", "AxLayerTidyUp", "AxExport"]
 body = window(20, 16, 680, 60 + 22 * len(cmds) + 52, "Rhino 8")
 body += '<rect class="term" x="34" y="52" width="652" height="30" rx="6"/>'
 body += '<text class="tt" x="46" y="72">Command: </text><text class="tg" x="112" y="72">Ax</text>'

@@ -45,8 +45,9 @@ namespace AxisBridge.UI
                 matPresets.Items.Add(preset[0] + "  " + preset[1], null, (s, e) => AddUnique(gridMat, preset[1], preset[0]));
             }
             tabs.TabPages.Add(Page("Materials", gridMat,
-                "Names are looked up in the AxisVM material catalog (S355 and 'S 355' both work). Elements reference the name.",
-                () => gridMat.Rows.Add("", "Steel"), matPresets));
+                "Names are looked up in the AxisVM material catalog (S355 and 'S 355' both work). Elements reference the name. " +
+                "'From AxisVM catalog' lists every Eurocode grade exactly as AxisVM spells it (exported once from AxisVM > Rhino Import).",
+                () => gridMat.Rows.Add("", "Steel"), matPresets, PickMaterials));
 
             // ---- Sections -------------------------------------------------------
             gridSec = MakeGrid();
@@ -58,6 +59,11 @@ namespace AxisBridge.UI
             gridSec.Columns.Add(NumCol("h", "h or d [mm]"));
             gridSec.Columns.Add(NumCol("t", "t [mm]"));
             gridSec.Columns.Add(new DataGridViewTextBoxColumn { Name = "desc", HeaderText = "Definition", ReadOnly = true, FillWeight = 170, DefaultCellStyle = { ForeColor = Theme.HintColor } });
+            // Where a catalog profile came from (catalog picker) - travels with the row, not shown.
+            gridSec.Columns.Add(new DataGridViewTextBoxColumn { Name = "cshape", Visible = false });
+            gridSec.Columns.Add(new DataGridViewTextBoxColumn { Name = "ctable", Visible = false });
+            gridSec.Columns.Add(new DataGridViewTextBoxColumn { Name = "cfile", Visible = false });
+            gridSec.Columns.Add(new DataGridViewTextBoxColumn { Name = "cname", Visible = false });
             foreach (LibSection s in source.Sections) AddSectionRow(s);
             gridSec.CellEndEdit += (s, e) => RefreshSectionRow(e.RowIndex);
             gridSec.CurrentCellDirtyStateChanged += (s, e) =>
@@ -74,8 +80,9 @@ namespace AxisBridge.UI
                 secPresets.Items.Add(preset, null, (s, e) => { if (!HasName(gridSec, preset)) AddSectionRow(new LibSection { Name = preset, Shape = LibSection.Catalog }); });
             }
             tabs.TabPages.Add(Page("Sections", gridSec,
-                "Catalog: the name is looked up in the AxisVM profile catalog (IPE300, HEA200...). Other shapes are created from the dimensions (mm). Leave the name blank to auto-name.",
-                () => AddSectionRow(new LibSection { Shape = LibSection.Rectangle, B = 300, H = 500 }), secPresets));
+                "Catalog: looked up in the AxisVM profile catalog (IPE300, HEA200...); picked 'From AxisVM catalog' = taken from that exact table. " +
+                "Other shapes are built from the dimensions (mm). Blank name = auto-name.",
+                () => AddSectionRow(new LibSection { Shape = LibSection.Rectangle, B = 300, H = 500 }), secPresets, PickSections));
 
             // ---- Load cases -----------------------------------------------------
             gridLc = MakeGrid();
@@ -90,7 +97,7 @@ namespace AxisBridge.UI
             }
             tabs.TabPages.Add(Page("Load cases", gridLc,
                 "Created in AxisVM in this order on import. Every load grid offers these names.",
-                () => gridLc.Rows.Add("", ""), lcPresets));
+                () => gridLc.Rows.Add("", ""), lcPresets, null));
 
             tabs.SelectedIndex = Math.Max(0, Math.Min(2, initialTab));
 
@@ -137,7 +144,7 @@ namespace AxisBridge.UI
             };
         }
 
-        private static TabPage Page(string title, DataGridView grid, string help, Action add, ContextMenuStrip presets)
+        private static TabPage Page(string title, DataGridView grid, string help, Action add, ContextMenuStrip presets, Action fromCatalog)
         {
             var page = new TabPage(title) { Padding = new Padding(8), UseVisualStyleBackColor = true };
             var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 34, WrapContents = false };
@@ -156,6 +163,12 @@ namespace AxisBridge.UI
                 for (int i = sorted.Count - 1; i >= 0; i--) grid.Rows.RemoveAt(sorted[i]);
             };
             bar.Controls.AddRange(new Control[] { bAdd, bPreset, bDel });
+            if (fromCatalog != null)
+            {
+                var bCat = new Button { Text = "From AxisVM catalog...", AutoSize = true, Height = 26 };
+                bCat.Click += (s, e) => fromCatalog();
+                bar.Controls.Add(bCat);
+            }
 
             var hint = Theme.Hint(help);
             hint.Dock = DockStyle.Bottom;
@@ -195,9 +208,77 @@ namespace AxisBridge.UI
 
         private void AddSectionRow(LibSection s)
         {
-            int i = gridSec.Rows.Add(s.Name, s.Shape, Num(s.B), Num(s.H), Num(s.T), s.Describe());
+            int i = gridSec.Rows.Add(s.Name, s.Shape, Num(s.B), Num(s.H), Num(s.T), s.Describe(),
+                s.CatalogShape > 0 ? s.CatalogShape.ToString(CultureInfo.InvariantCulture) : "", s.CatalogTable ?? "", s.CatalogFile ?? "", s.CatalogName ?? "");
             RefreshSectionRow(i);
         }
+
+        // ==================================================================
+        // AxisVM catalog (exported by the AxisVM Rhino Import add-on)
+        // ==================================================================
+
+        /// <summary>The catalog the AxisVM add-on exported; explains how to export it when there is none yet.</summary>
+        private AxCatalog Catalog()
+        {
+            AxCatalog c = AxCatalog.FindDefault();
+            if (c != null) return c;
+
+            MessageBox.Show(this,
+                "The AxisVM catalog has not been exported on this computer yet.\r\n\r\n" +
+                "In AxisVM open the Rhino Import tool and click 'Export catalog for Rhino' (once; again after an AxisVM update). " +
+                "It writes every Eurocode material and cross-section table to\r\n\r\n" + AxCatalog.DefaultFolder() +
+                "\r\n\r\nand they are listed here from then on.",
+                "AxisBridge library", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return null;
+        }
+
+        private void PickMaterials()
+        {
+            AxCatalog c = Catalog();
+            if (c == null) return;
+            gridMat.EndEdit();
+            using (var f = CatalogPickerForm.ForMaterials(c, Names(gridMat)))
+            {
+                if (f.ShowDialog(this) != DialogResult.OK) return;
+                foreach (object o in f.Picked)
+                {
+                    LibMaterial m = AxCatalog.ToLibrary((CatalogMaterial)o);
+                    AddUnique(gridMat, m.Name, m.Family);
+                }
+            }
+        }
+
+        private void PickSections()
+        {
+            AxCatalog c = Catalog();
+            if (c == null) return;
+            gridSec.EndEdit();
+            using (var f = CatalogPickerForm.ForSections(c, Names(gridSec)))
+            {
+                if (f.ShowDialog(this) != DialogResult.OK) return;
+                foreach (object o in f.Picked)
+                {
+                    LibSection s = AxCatalog.ToLibrary((CatalogSection)o);
+                    if (!HasName(gridSec, s.Name)) AddSectionRow(s);
+                }
+            }
+        }
+
+        private static List<string> Names(DataGridView g)
+        {
+            var names = new List<string>();
+            foreach (DataGridViewRow r in g.Rows) names.Add((Convert.ToString(r.Cells["name"].Value) ?? "").Trim());
+            return names;
+        }
+
+        /// <summary>Adds catalog picks the way the picker does, without its dialog (offline preview and checks).</summary>
+        public void AddFromCatalogForTest(IEnumerable<CatalogMaterial> materials, IEnumerable<CatalogSection> sections)
+        {
+            foreach (CatalogMaterial m in materials) { LibMaterial l = AxCatalog.ToLibrary(m); AddUnique(gridMat, l.Name, l.Family); }
+            foreach (CatalogSection s in sections) { LibSection l = AxCatalog.ToLibrary(s); if (!HasName(gridSec, l.Name)) AddSectionRow(l); }
+        }
+
+        public AxLibrary CollectForTest() { return Collect(); }
 
         private static string Num(double v) { return v > 0 ? v.ToString("0.###", CultureInfo.InvariantCulture) : ""; }
 
@@ -209,7 +290,7 @@ namespace AxisBridge.UI
 
         private LibSection ReadSection(DataGridViewRow r)
         {
-            return new LibSection
+            var s = new LibSection
             {
                 Name = (Convert.ToString(r.Cells["name"].Value) ?? "").Trim(),
                 Shape = Convert.ToString(r.Cells["shape"].Value) ?? LibSection.Catalog,
@@ -217,6 +298,18 @@ namespace AxisBridge.UI
                 H = Parse(r.Cells["h"].Value),
                 T = Parse(r.Cells["t"].Value)
             };
+            if (s.Shape == LibSection.Catalog)
+            {
+                int shape;
+                int.TryParse(Convert.ToString(r.Cells["cshape"].Value), NumberStyles.Integer, CultureInfo.InvariantCulture, out shape);
+                string table = Convert.ToString(r.Cells["ctable"].Value) ?? "", file = Convert.ToString(r.Cells["cfile"].Value) ?? "";
+                if (shape > 0) s.CatalogShape = shape;
+                if (table.Length > 0) s.CatalogTable = table;
+                if (file.Length > 0) s.CatalogFile = file;
+                string exact = Convert.ToString(r.Cells["cname"].Value) ?? "";
+                if (exact.Length > 0 && exact != s.Name) s.CatalogName = exact;
+            }
+            return s;
         }
 
         /// <summary>Greys out dimension cells the shape does not use and refreshes the definition text.</summary>
