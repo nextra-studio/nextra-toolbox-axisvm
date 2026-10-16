@@ -58,6 +58,10 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Functions\ConnectionLoadExtractorFunction.cs" />
+    <Compile Include="Functions\AxisTriadDrawer.cs" />
+    <Compile Include="UI\AxisPreviewControl.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="Core\ConnectionLoadMath.cs" />
     <Compile Include="Core\AddonIcons.cs" />
     <Compile Include="UI\Theme.cs" />

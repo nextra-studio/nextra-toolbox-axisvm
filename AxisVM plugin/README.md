@@ -47,6 +47,23 @@ AxisVM plugin/                      <- AxisVM sources (repository root is one le
 3. Copy the built DLL from `AxisVM plugin/bin/Debug/` to `C:\AXISVM X8\AddOns\`.
 4. Restart AxisVM — the add-ons appear in the Add-ons menu / toolbar.
 
+## Toolbar icons
+
+Icons are drawn in `AxisVM plugin/Core/AddonIcons.cs`. Which bitmap AxisVM accepts depends on the toolbar
+(`Addon_ButtonPlaceToolbarId`). This was checked in AxisVM X8:
+
+| Toolbar | Bitmap the add-on must return | Transparency |
+|---|---|---|
+| Model tabs (Geometry, Elements, Loads; IDs 0–2) | 16 × 16 px | Magenta (`Addon_IconBitmapTransparentColor`) |
+| Static (ID 4; larger buttons. The other result tabs look the same but are not tested) | **24 × 24 px** | Alpha channel: background pixels need **alpha 0**; the magenta colour key is ignored |
+
+If the size is wrong, AxisVM does not draw the icon and shows its default blue **"+"** instead. If the alpha is
+missing, the icon shows on a solid magenta square. `AddonIcons.ConnectionLoadExtractor(24)` (used by the
+Connection Load Extractor on the Static tab) shows the pattern: it draws the normal 16 px icon, scales it to 24 px
+(nearest neighbour, so no colour blending), and saves a 32 bpp BMP with the magenta background at alpha 0.
+
+AxisVM reads icons only at startup, so restart AxisVM after copying a new DLL.
+
 ## References
 
 - AxisVM docs: <https://axisvm.eu/docs/how-to-create-a-simple-plugin-for-axisvm/>

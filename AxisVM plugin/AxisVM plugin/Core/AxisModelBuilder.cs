@@ -39,6 +39,18 @@ namespace AxisVM_plugin.Core
         /// Entities "Send to Rhino" adopted are replaced only when Rhino knows what they became; null keeps them all.
         /// </summary>
         public HashSet<string> RhinoKnownGuids;
+
+        /// <summary>
+        /// Live link only: load panels drawn in AxisVM as free polygons that "Send to Rhino" adopted - outline state -> Rhino id
+        /// (RhinoLinkSender.AdoptedPanels). They have no lines to mark, so they are found by their outline.
+        /// </summary>
+        public Dictionary<string, string> AdoptedPanels;
+
+        /// <summary>
+        /// Update only: mesh the rebuilt domains whose predecessor had a mesh again, all in one batch (RestoreMeshes).
+        /// Off by default - meshing a large model takes minutes; the report then says how many to mesh.
+        /// </summary>
+        public bool RemeshRebuilt;
     }
 
     /// <summary>Counters for the run summary.</summary>
@@ -58,6 +70,7 @@ namespace AxisVM_plugin.Core
         public int LinksCreated;
         public int RigidBodiesCreated;
         public int HingesCreated;
+        public int DiaphragmsCreated;
         public int LoadsCreated;
         public int PartsCreated;
         public int AttributeErrors;
@@ -249,43 +262,61 @@ namespace AxisVM_plugin.Core
         /// <summary>UIDs of the lines that existed before this import. They are never split, merged or deleted.</summary>
         private readonly HashSet<int> preexistingLineUids = new HashSet<int>();
 
+        /// <summary>Seconds spent in each import step ("BuildGeometry 1.2 s"), for finding what is slow on big models.</summary>
+        public readonly List<string> Timings = new List<string>();
+
+        /// <summary>Optional: told each finished step as it happens (test drivers print it).</summary>
+        public Action<string> Log;
+
+        private void Step(string name, Action action)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            action();
+            string line = string.Format(CultureInfo.InvariantCulture, "{0} {1:0.0} s", name, sw.Elapsed.TotalSeconds);
+            Timings.Add(line);
+            if (Log != null) Log(line);
+        }
+
         public void Run()
         {
-            ValidateAttributeNames();
-            PrepareJobs();
+            Step("Validate", ValidateAttributeNames);
+            Step("PrepareJobs", PrepareJobs);
 
-            if (opt.ReplacePrevious) RemovePrevious();
+            if (opt.ReplacePrevious) Step("RemovePrevious", RemovePrevious);
 
             if (!opt.DryRun)
             {
-                CaptureBefore();
-                int n = SafeLineCount();
-                for (int i = 1; i <= n; i++)
+                Step("CaptureBefore", () =>
                 {
-                    try { preexistingLineUids.Add(model.Lines.get_UID(i)); } catch { }
-                }
+                    CaptureBefore();
+                    foreach (int uid in LineUids()) preexistingLineUids.Add(uid);
+                });
+                Step("Library", () => { catalog.CreateLibraryLoadCases(); catalog.CreateLibraryCombinations(); });
             }
 
-            if (!opt.DryRun) { catalog.CreateLibraryLoadCases(); catalog.CreateLibraryCombinations(); }
+            Step("BuildGeometry", BuildGeometry);
 
-            BuildGeometry();
-
-            if (opt.AutoIntersect && !opt.DryRun) IntersectAndResolve();
+            if (opt.AutoIntersect && !opt.DryRun) Step("IntersectAndResolve", IntersectAndResolve);
 
             // One-way panels with edge strips split their boundary lines (SplitByNode inside the
             // panel generator), which re-indexes lines. So they are built first and every chain is
             // re-resolved before any id is used.
-            BuildOneWayPanels();
+            Step("OneWayPanels", () => BuildOneWayPanels());
 
-            ApplyMemberTypes();
-            BuildSurfaces();
-            ApplySupports();
-            BuildConnectors();
-            BuildEdgeHinges();
-            BuildLoads();
-            BuildParts();
-            StampRhinoIds();
-            MarkCreated();
+            // Before the member types: adding lines to a diaphragm turns beams and ribs into plain lines (typing them
+            // afterwards keeps them in the diaphragm).
+            Step("Diaphragms", BuildDiaphragms);
+            Step("MemberTypes", ApplyMemberTypes);
+            Step("Surfaces", BuildSurfaces);
+            Step("Supports", ApplySupports);
+            Step("Connectors", BuildConnectors);
+            Step("EdgeHinges", BuildEdgeHinges);
+            Step("Loads", BuildLoads);
+            Step("Parts", BuildParts);
+            // Before the ids are stamped: meshing splits lines, and the pieces must carry the marks too.
+            Step("Remesh", RestoreMeshes);
+            Step("StampRhinoIds", StampRhinoIds);
+            Step("MarkCreated", MarkCreated);
         }
 
         /// <summary>
@@ -860,7 +891,79 @@ namespace AxisVM_plugin.Core
             public readonly Dictionary<string, List<LiveSeg>> ByPair = new Dictionary<string, List<LiveSeg>>(StringComparer.Ordinal);
         }
 
+        /// <summary>
+        /// The model's nodes and lines as they are now. Read with three bulk calls (coordinates, line data, UIDs): this runs
+        /// after every split while connecting lines, and item-by-item reads made a large model take many minutes. Falls back
+        /// to reading item by item when a bulk call is refused.
+        /// </summary>
         private LiveModel ReadLive(double tol)
+        {
+            try
+            {
+                LiveModel bulk = ReadLiveBulk(tol);
+                if (bulk != null) return bulk;
+            }
+            catch { }
+            return ReadLiveOneByOne(tol);
+        }
+
+        private LiveModel ReadLiveBulk(double tol)
+        {
+            LiveModel live = new LiveModel { Index = new NodeIndex(tol) };
+            Dictionary<int, double[]> xyz = new Dictionary<int, double[]>();
+
+            int nodeCount = SafeNodeCount();
+            if (nodeCount > 0)
+            {
+                Array coords;
+                if (model.Nodes.BulkGetCoord(Range(nodeCount), out coords) <= 0 || coords == null || coords.Length < nodeCount) return null;
+                int lo = coords.GetLowerBound(0);
+                for (int i = 0; i < nodeCount; i++)
+                {
+                    RPoint3d p = (RPoint3d)coords.GetValue(lo + i);
+                    xyz[i + 1] = new[] { p.x, p.y, p.z };
+                    live.Index.Add(p.x, p.y, p.z, i + 1);
+                }
+            }
+
+            int lineCount = SafeLineCount();
+            if (lineCount > 0)
+            {
+                Array data, uids;
+                Array ids = Range(lineCount);
+                if (model.Lines.BulkGetLineData(ids, out data) <= 0 || data == null || data.Length < lineCount) return null;
+                if (model.Lines.BulkGetUIDs(ids, out uids) <= 0 || uids == null || uids.Length < lineCount) return null;
+                int lo = data.GetLowerBound(0), ulo = uids.GetLowerBound(0);
+                for (int i = 0; i < lineCount; i++)
+                {
+                    RLineData d = (RLineData)data.GetValue(lo + i);
+                    double[] a, b;
+                    if (!xyz.TryGetValue(d.NodeId1, out a) || !xyz.TryGetValue(d.NodeId2, out b)) continue;
+                    bool old = preexistingLineUids.Contains(Convert.ToInt32(uids.GetValue(ulo + i)));
+                    AddSeg(live, new LiveSeg { Id = i + 1, NodeA = d.NodeId1, NodeB = d.NodeId2, A = a, B = b, IsArc = d.GeomType == ELineGeomType.lgtCircleArc, Preexisting = old });
+                }
+            }
+            return live;
+        }
+
+        private static void AddSeg(LiveModel live, LiveSeg s)
+        {
+            live.Segs.Add(s);
+            string key = PairKey(s.NodeA, s.NodeB);
+            List<LiveSeg> list;
+            if (!live.ByPair.TryGetValue(key, out list)) { list = new List<LiveSeg>(); live.ByPair[key] = list; }
+            list.Add(s);
+        }
+
+        /// <summary>1..count as AxisVM's 1-based id array.</summary>
+        private static Array Range(int count)
+        {
+            Array ids = Array.CreateInstance(typeof(int), new[] { count }, new[] { 1 });
+            for (int i = 1; i <= count; i++) ids.SetValue(i, i);
+            return ids;
+        }
+
+        private LiveModel ReadLiveOneByOne(double tol)
         {
             LiveModel live = new LiveModel { Index = new NodeIndex(tol) };
             Dictionary<int, double[]> xyz = new Dictionary<int, double[]>();

@@ -50,10 +50,13 @@ namespace AxisVM_plugin.Core
         /// <summary>Two-way load panel: ids of the Rhino curves / points that alone receive its load ("" = automatic).</summary>
         public const string LoadTargets = "Ax_LoadTargets";
 
+        /// <summary>Rigid diaphragm name on curves and surfaces (a surface means all its edges); equal names form one diaphragm.</summary>
+        public const string Diaphragm = "Ax_Diaphragm";
+
         /// <summary>Every key this version understands, used to warn about typos in the Rhino attributes.</summary>
         public static readonly HashSet<string> Known = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            Guid, Parts,
+            Guid, Parts, Diaphragm,
             Support, NodalLoad,
             Type, Material, Section, Release, LocalAxis, Eccentricity, PointLoad, DistLoad, Stiffness, HingeDomains, CoupledDof,
             FeType, Thickness, SpanDirection, EdgeSpacing, SpanTolerance, LoadTargets

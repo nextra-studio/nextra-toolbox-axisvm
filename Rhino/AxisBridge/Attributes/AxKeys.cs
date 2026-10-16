@@ -44,6 +44,7 @@ namespace AxisBridge.Attributes
 
         // Common
         public const string Parts = "Ax_Parts";
+        public const string Diaphragm = "Ax_Diaphragm";       // rigid diaphragm name on curves / surfaces; equal names = one diaphragm
 
         /// <summary>Keys that may repeat with a numeric suffix (one load per key).</summary>
         public static readonly string[] Families = { NodalLoad, PointLoad, DistLoad };
@@ -51,7 +52,7 @@ namespace AxisBridge.Attributes
         private static readonly HashSet<string> ExactKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             Guid, Support, Type, Material, Section, Release, LocalAxis, Eccentricity,
-            Stiffness, HingeDomains, CoupledDof, FeType, Thickness, SpanDirection, EdgeSpacing, SpanTolerance, LoadTargets, Parts
+            Stiffness, HingeDomains, CoupledDof, FeType, Thickness, SpanDirection, EdgeSpacing, SpanTolerance, LoadTargets, Parts, Diaphragm
         };
 
         /// <summary>

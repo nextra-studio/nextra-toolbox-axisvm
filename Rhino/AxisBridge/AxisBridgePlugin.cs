@@ -22,7 +22,7 @@ namespace AxisBridge
 
         protected override LoadReturnCode OnLoad(ref string errorMessage)
         {
-            Rhino.RhinoApp.WriteLine("AxisBridge plugin loaded successfully. Commands: AxPoint, AxLine, AxDomain, AxLibrary, AxExport, AxLink, AxVisualize, AxLayerTidyUp, AxUpdateGuid, AxClear");
+            Rhino.RhinoApp.WriteLine("AxisBridge plugin loaded successfully. Commands: AxPoint, AxLine, AxDomain, AxLibrary, AxExport, AxLink, AxPickup, AxVisualize, AxLayerTidyUp, AxUpdateGuid, AxClear");
             return LoadReturnCode.Success;
         }
     }

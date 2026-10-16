@@ -30,6 +30,9 @@ namespace AxisBridge.Visualize
         public double SymbolScale = 1.0;
         public double ArrowScale = 1.0;
         public int LabelSize = 12;
+
+        /// <summary>Element types (Beam, Plate, Node, ...) the user unticked; nothing is drawn for them.</summary>
+        public readonly HashSet<string> HiddenTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -46,6 +49,7 @@ namespace AxisBridge.Visualize
 
         private readonly List<Item> items = new List<Item>();
         private readonly List<string> caseNames = new List<string>();
+        private readonly List<string> typeNames = new List<string>();
         private BoundingBox sceneBox = BoundingBox.Empty;
         private double baseSize = 1.0;
         private uint docSerial;
@@ -66,6 +70,17 @@ namespace AxisBridge.Visualize
 
         private static Mesh unitSphere, unitBox, unitDisc;
 
+        /// <summary>Viewport of the frame being drawn; every symbol size is given in pixels and converted here.</summary>
+        private RhinoViewport vp;
+
+        // Screen sizes in pixels (times the window sliders), so symbols keep their size while zooming.
+        private const double SymbolPx = 9.0;
+        private const double ArrowPx = 60.0;
+        private const double HeadPx = 11.0;
+        private const double ReleaseInsetPx = 18.0;
+        private const double TriadPx = 35.0;
+        private const double StationPx = 26.0;
+
         public AxVisualConduit(VisualSettings settings)
         {
             Settings = settings ?? new VisualSettings();
@@ -73,6 +88,9 @@ namespace AxisBridge.Visualize
 
         /// <summary>Load case names used by the objects (after the last read), in first-seen order.</summary>
         public IList<string> CaseNames => caseNames.AsReadOnly();
+
+        /// <summary>Element types present in the model (after the last read), in first-seen order.</summary>
+        public IList<string> TypeNames => typeNames.AsReadOnly();
 
         public void Start()
         {
@@ -143,6 +161,7 @@ namespace AxisBridge.Visualize
         private class Item
         {
             public RhinoObject Obj;
+            public string TypeName;
             public Point3d Anchor;
             public Curve Crv;
             public double Length;
@@ -172,6 +191,7 @@ namespace AxisBridge.Visualize
         {
             items.Clear();
             caseNames.Clear();
+            typeNames.Clear();
             sceneBox = BoundingBox.Empty;
             double tol = doc.ModelAbsoluteTolerance;
 
@@ -181,7 +201,7 @@ namespace AxisBridge.Visualize
                 if (AxLayers.IsOnTagTree(doc, obj)) continue;
 
                 Dictionary<string, string> attrs = AttrReader.GetAxAttributes(obj);
-                if (attrs.Count == 0) continue;
+                if (!AxClassify.IsTagged(attrs)) continue;
 
                 sceneBox.Union(obj.Geometry.GetBoundingBox(false));
 
@@ -191,6 +211,8 @@ namespace AxisBridge.Visualize
                 if (geomKind == AxGeomKind.Line) it.Crv = obj.Geometry as Curve;
                 if (it.Crv != null) it.Length = it.Crv.GetLength();
                 it.Surface = geomKind == AxGeomKind.Domain;
+                it.TypeName = AxClassify.ElementTypeName(obj, attrs);
+                if (!typeNames.Contains(it.TypeName)) typeNames.Add(it.TypeName);
 
                 string type = Get(attrs, AxKeys.Type), fe = Get(attrs, AxKeys.FeType);
                 if (it.Crv != null)
@@ -285,7 +307,7 @@ namespace AxisBridge.Visualize
             foreach (BrepFace face in brep.Faces)
             {
                 double size = face.GetBoundingBox(false).Diagonal.Length;
-                int n = Math.Max(3, Math.Min(10, (int)Math.Round(size / (baseSize * 3.0))));
+                int n = Math.Max(4, Math.Min(24, (int)Math.Round(size / baseSize)));
                 Interval du = face.Domain(0), dv = face.Domain(1);
                 for (int i = 0; i < n; i++)
                     for (int j = 0; j < n; j++)
@@ -324,8 +346,10 @@ namespace AxisBridge.Visualize
         {
             EnsureBuilt(e.RhinoDoc);
             if (!sceneBox.IsValid) return;
+            vp = e.Viewport;
             BoundingBox bb = sceneBox;
-            double grow = ArrowLength(1.0) + baseSize * 3.0 * Settings.SymbolScale;
+            // Symbols are pixel sized, so how far they reach in world units depends on the zoom.
+            double grow = Px(sceneBox.Center, ArrowPx * Settings.ArrowScale + SymbolPx * 3.0 * Settings.SymbolScale + 20);
             bb.Inflate(grow);
             e.IncludeBoundingBox(bb);
         }
@@ -333,11 +357,12 @@ namespace AxisBridge.Visualize
         protected override void PostDrawObjects(DrawEventArgs e)
         {
             EnsureBuilt(e.RhinoDoc);
+            vp = e.Viewport;
             Scales scales = Settings.Loads ? MaxValues() : null;
 
             foreach (Item it in items)
             {
-                if (!IsShown(e.RhinoDoc, it.Obj)) continue;
+                if (!IsShown(e.RhinoDoc, it)) continue;
                 if (Settings.Supports && it.Support != null) DrawSupport(e.Display, it);
                 if (Settings.Releases && it.Release != null) DrawReleaseMarkers(e.Display, it);
                 if (Settings.Span) foreach (Line l in it.Spans) DrawDoubleArrow(e.Display, l, SpanColor);
@@ -349,12 +374,13 @@ namespace AxisBridge.Visualize
         protected override void DrawForeground(DrawEventArgs e)
         {
             EnsureBuilt(e.RhinoDoc);
+            vp = e.Viewport;
             Scales scales = Settings.Loads && Settings.LoadValues ? MaxValues() : null;
             var labels = new List<ValueLabel>();
 
             foreach (Item it in items)
             {
-                if (!IsShown(e.RhinoDoc, it.Obj)) continue;
+                if (!IsShown(e.RhinoDoc, it)) continue;
 
                 var lines = new List<string>();
                 if (Settings.Info) lines.AddRange(it.Info);
@@ -363,9 +389,10 @@ namespace AxisBridge.Visualize
                     it.Crv != null ? -(lines.Count * Math.Max(6, Settings.LabelSize) * 0.6 + 10) : 0);
 
                 if (Settings.Supports && it.Support != null && SupportKind(it.Support) == "custom")
-                    DrawLabel(e, it.Crv != null ? it.Anchor : it.Anchor - Vector3d.ZAxis * SymbolSize() * 2.5, new List<string> { "k=" + Short(it.Support) }, CustomSupportColor);
+                    DrawLabel(e, it.Anchor, new List<string> { "k=" + Short(it.Support) }, CustomSupportColor, SymbolPx * Settings.SymbolScale * 2 + 12);
 
-                if (Settings.Releases && it.Release != null)
+                // Release text only when the member is long enough on screen for both labels to fit.
+                if (Settings.Releases && it.Release != null && ScreenLength(e, it) >= 140)
                 {
                     foreach (bool start in new[] { true, false })
                     {
@@ -389,8 +416,37 @@ namespace AxisBridge.Visualize
                 DrawLabel(e, v.At, new List<string> { v.Text }, v.Color);
         }
 
-        private bool IsShown(RhinoDoc doc, RhinoObject obj)
+        private static double ScreenLength(DrawEventArgs e, Item it)
         {
+            Point2d a = e.Viewport.WorldToClient(it.Crv.PointAtStart), b = e.Viewport.WorldToClient(it.Crv.PointAtEnd);
+            return Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+        }
+
+        /// <summary>World length that shows as the given number of pixels at this point of the current view.</summary>
+        private double Px(Point3d at, double pixels)
+        {
+            double ppu;
+            if (vp != null && vp.GetWorldToScreenScale(at, out ppu) && ppu > 1e-12) return pixels / ppu;
+            return pixels * baseSize / 10.0;
+        }
+
+        private double ScreenDistance(Point3d a, Point3d b)
+        {
+            if (vp == null) return 0;
+            Point2d sa = vp.WorldToClient(a), sb = vp.WorldToClient(b);
+            return Math.Sqrt((sa.X - sb.X) * (sa.X - sb.X) + (sa.Y - sb.Y) * (sa.Y - sb.Y));
+        }
+
+        private static Vector3d Unit(Vector3d v)
+        {
+            v.Unitize();
+            return v;
+        }
+
+        private bool IsShown(RhinoDoc doc, Item it)
+        {
+            if (Settings.HiddenTypes.Contains(it.TypeName)) return false;
+            RhinoObject obj = it.Obj;
             if (obj == null || obj.IsDeleted || !obj.Visible) return false;
             int li = obj.Attributes.LayerIndex;
             return li < 0 || li >= doc.Layers.Count || doc.Layers[li].IsVisible;
@@ -413,15 +469,12 @@ namespace AxisBridge.Visualize
 
         // ---------------------------------------------------------- supports
 
-        private double SymbolSize() { return baseSize * 0.8 * Settings.SymbolScale; }
+        private double SymbolSize(Point3d at) { return Px(at, SymbolPx * Settings.SymbolScale); }
 
         private static string SupportKind(string raw)
         {
-            string k = (raw ?? "").Trim().ToLowerInvariant();
-            if (k == "fixed" || k == "fix") return "fixed";
-            if (k == "pinned" || k == "pin") return "pinned";
-            if (k == "roller-z" || k == "rollerz" || k == "roller") return "roller";
-            return "custom";
+            string k = AxClassify.SupportKindName(raw);
+            return k == null ? "custom" : k.ToLowerInvariant();
         }
 
         private void DrawSupport(DisplayPipeline d, Item it)
@@ -434,14 +487,16 @@ namespace AxisBridge.Visualize
             }
 
             d.DrawCurve(it.Crv, kind == "custom" ? CustomSupportColor : SupportColor, 5);
-            for (int i = 0; i <= 4; i++)
-                DrawSupportSymbol(d, AtLength(it, it.Length * i / 4.0), kind);
+            // About one symbol per 60 px of member on screen, at least both ends.
+            int n = Math.Max(1, Math.Min(20, (int)(ScreenDistance(it.Crv.PointAtStart, it.Crv.PointAtEnd) / 60.0)));
+            for (int i = 0; i <= n; i++)
+                DrawSupportSymbol(d, AtLength(it, it.Length * i / n), kind);
         }
 
         private void DrawSupportSymbol(DisplayPipeline d, Point3d p, string kind)
         {
             EnsureMeshes();
-            double s = SymbolSize();
+            double s = SymbolSize(p);
             Transform xf = Transform.Translation(new Vector3d(p)) * Transform.Scale(Point3d.Origin, s);
             d.PushModelTransform(xf);
             switch (kind)
@@ -493,7 +548,8 @@ namespace AxisBridge.Visualize
 
         private Point3d ReleasePoint(Item it, bool start)
         {
-            double inset = Math.Min(0.12 * it.Length, 2.0 * baseSize * Settings.SymbolScale);
+            Point3d end = start ? it.Crv.PointAtStart : it.Crv.PointAtEnd;
+            double inset = Math.Min(0.3 * it.Length, Px(end, ReleaseInsetPx * Settings.SymbolScale));
             return AtLength(it, start ? inset : it.Length - inset);
         }
 
@@ -577,10 +633,11 @@ namespace AxisBridge.Visualize
             return s;
         }
 
-        private double ArrowLength(double ratio)
+        /// <summary>Arrow length for a value at this ratio of the largest one, measured at the given point.</summary>
+        private double ArrowLength(double ratio, Point3d at)
         {
-            if (ratio <= 0) return 0;
-            return baseSize * 8.0 * Settings.ArrowScale * Math.Max(0.15, Math.Min(1.0, ratio));
+            if (ratio <= 0 || double.IsNaN(ratio)) return 0;
+            return Px(at, ArrowPx * Settings.ArrowScale * Math.Max(0.15, Math.Min(1.0, ratio)));
         }
 
         /// <summary>
@@ -611,10 +668,10 @@ namespace AxisBridge.Visualize
 
                     Point3d tail = p;
                     if (f.Length > 1e-12)
-                        tail = Arrow(d, p, f, ArrowLength(f.Length / s.Force), ForceColor);
+                        tail = Arrow(d, p, f, ArrowLength(f.Length / s.Force, p), ForceColor);
                     if (m.Length > 1e-12)
                     {
-                        Point3d mTip = MomentArrow(d, p, m, ArrowLength(m.Length / s.Moment));
+                        Point3d mTip = MomentArrow(d, p, m, ArrowLength(m.Length / s.Moment, p));
                         if (f.Length <= 1e-12) tail = mTip;
                     }
                     labels?.Add(new ValueLabel(tail, text, f.Length > 1e-12 ? ForceColor : MomentColor));
@@ -631,17 +688,30 @@ namespace AxisBridge.Visualize
                     if (b - a <= 1e-9) break;
 
                     double[] v2 = r.V2 ?? r.V;
-                    int n = Math.Max(2, Math.Min(20, (int)Math.Ceiling((b - a) / (baseSize * 3.0)) + 1));
+                    Point3d pa = AtLength(it, a), pb = AtLength(it, b), mid = AtLength(it, (a + b) / 2);
+                    // One world scale for the whole member, so the diagram stays a straight (or trapezoid) line.
+                    double full = ArrowLength(1.0, mid);
+                    int n = Math.Max(2, Math.Min(40, (int)(ScreenDistance(pa, pb) / StationPx) + 1));
                     var tails = new List<Point3d>();
+                    var feet = new List<Point3d>();
                     for (int i = 0; i < n; i++)
                     {
                         double k = (double)i / (n - 1), at = a + (b - a) * k;
                         Vector3d q = Vec(r.V, 0) * (1 - k) + Vec(v2, 0) * k;
                         if (r.System == "Local") q = ToGlobal(it, at, q);
                         Point3d p = AtLength(it, at);
-                        tails.Add(q.Length > 1e-12 ? Arrow(d, p, q, ArrowLength(q.Length / s.Line), LineLoadColor) : p);
+                        double ratio = s.Line > 0 ? q.Length / s.Line : 0;
+                        double len = ratio <= 0 ? 0 : full * Math.Max(0.15, Math.Min(1.0, ratio));
+                        feet.Add(p);
+                        tails.Add(q.Length > 1e-12 ? Arrow(d, p, q, len, LineLoadColor) : p);
                     }
-                    d?.DrawPolyline(tails, LineLoadColor, 2);
+                    if (d != null)
+                    {
+                        d.DrawPolyline(tails, LineLoadColor, 2);
+                        // Close the diagram at both ends of the loaded length.
+                        d.DrawLine(feet[0], tails[0], LineLoadColor, 2);
+                        d.DrawLine(feet[feet.Count - 1], tails[tails.Count - 1], LineLoadColor, 2);
+                    }
                     labels?.Add(new ValueLabel(tails[tails.Count / 2], text, LineLoadColor));
                     break;
                 }
@@ -651,14 +721,19 @@ namespace AxisBridge.Visualize
                     Vector3d q = Vec(r.V, 0);
                     if (q.Length <= 1e-12 || it.AreaPts == null) break;
                     bool local = r.System == "Local";
-                    double len = ArrowLength(q.Length / s.Area);
-                    Point3d labelAt = it.Anchor;
+                    double len = ArrowLength(s.Area > 0 ? q.Length / s.Area : 0, it.Anchor);
+                    Point3d labelAt = local ? it.Anchor : it.Anchor - Unit(q) * len;
+                    // One arrow per screen cell, so a zoomed-out surface does not turn into a solid block.
+                    var used = new HashSet<long>();
+                    double cell = StationPx * 1.3;
                     for (int i = 0; i < it.AreaPts.Count; i++)
                     {
+                        Point2d sp = vp != null ? vp.WorldToClient(it.AreaPts[i]) : Point2d.Origin;
+                        long key = ((long)Math.Floor(sp.X / cell) << 32) ^ (long)(uint)(int)Math.Floor(sp.Y / cell);
+                        if (!used.Add(key)) continue;
                         // Local: the z part follows the surface normal, the in-plane parts stay global.
                         Vector3d qi = local ? new Vector3d(q.X, q.Y, 0) + it.AreaNormals[i] * q.Z : q;
-                        Point3d t = Arrow(d, it.AreaPts[i], qi, len, AreaLoadColor);
-                        if (i == it.AreaPts.Count / 2) labelAt = t;
+                        Arrow(d, it.AreaPts[i], qi, len, AreaLoadColor);
                     }
                     if (!local && it.Outlines != null)
                     {
@@ -687,7 +762,7 @@ namespace AxisBridge.Visualize
             if (d != null)
             {
                 d.DrawLine(tail, p, c, 2);
-                d.DrawArrowHead(p, dir, c, 0, Math.Min(length * 0.45, baseSize * 1.2 * Settings.SymbolScale));
+                d.DrawArrowHead(p, dir, c, HeadPx * Settings.SymbolScale, 0);
             }
             return tail;
         }
@@ -699,18 +774,18 @@ namespace AxisBridge.Visualize
             Point3d tip = p + m * length;
             if (d != null)
             {
-                double head = Math.Min(length * 0.35, baseSize * 1.0 * Settings.SymbolScale);
+                double headPx = HeadPx * Settings.SymbolScale;
                 d.DrawLine(p, tip, MomentColor, 2);
-                d.DrawArrowHead(tip, m, MomentColor, 0, head);
-                d.DrawArrowHead(tip - m * head * 0.9, m, MomentColor, 0, head);
+                d.DrawArrowHead(tip, m, MomentColor, headPx, 0);
+                d.DrawArrowHead(tip - m * Px(tip, headPx * 0.9), m, MomentColor, headPx, 0);
             }
             return tip;
         }
 
         private void DrawDoubleArrow(DisplayPipeline d, Line l, Color c)
         {
-            d.DrawArrow(l, c, 0, 0.2);
-            d.DrawArrow(new Line(l.To, l.From), c, 0, 0.2);
+            d.DrawArrow(l, c, HeadPx * 1.4 * Settings.SymbolScale, 0);
+            d.DrawArrow(new Line(l.To, l.From), c, HeadPx * 1.4 * Settings.SymbolScale, 0);
         }
 
         /// <summary>"Fz=-12", "qz=-5→-8", "qz=-2.5" - the case is in the window, so it is left out.</summary>
@@ -767,10 +842,10 @@ namespace AxisBridge.Visualize
             Vector3d x, y, z;
             Frame(it, it.Length / 2, out x, out y, out z);
             Point3d o = AtLength(it, it.Length / 2);
-            double len = baseSize * 2.5 * Settings.SymbolScale;
-            d.DrawArrow(new Line(o, o + x * len), Color.Red, 0, 0.25);
-            d.DrawArrow(new Line(o, o + y * len), Color.FromArgb(0, 170, 0), 0, 0.25);
-            d.DrawArrow(new Line(o, o + z * len), Color.Blue, 0, 0.25);
+            double len = Px(o, TriadPx * Settings.SymbolScale), head = HeadPx * 0.8 * Settings.SymbolScale;
+            d.DrawArrow(new Line(o, o + x * len), Color.Red, head, 0);
+            d.DrawArrow(new Line(o, o + y * len), Color.FromArgb(0, 170, 0), head, 0);
+            d.DrawArrow(new Line(o, o + z * len), Color.Blue, head, 0);
         }
 
         // ---------------------------------------------------------- helpers

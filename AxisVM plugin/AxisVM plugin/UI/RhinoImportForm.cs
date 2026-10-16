@@ -29,6 +29,8 @@ namespace AxisVM_plugin.UI
 
         /// <summary>Connect crossing lines / points on lines before the attributes are applied.</summary>
         public bool AutoIntersect { get { return chkAutoIntersect.Checked; } }
+        /// <summary>Live link: mesh the domains a load rebuilt again (off by default).</summary>
+        public bool RemeshRebuilt { get { return chkRemesh != null && chkRemesh.Checked; } }
 
         /// <summary>Delete what an earlier import of this file created before building (update).</summary>
         public bool ReplacePrevious { get { return chkReplace.Checked && chkReplace.Enabled; } }
@@ -88,6 +90,7 @@ namespace AxisVM_plugin.UI
         private TextBox txtLinkPath;
         private Label lblLinkStatus;
         private Button btnLinkLoad;
+        private CheckBox chkRemesh;
         private Button btnLinkSend;
 
         public RhinoImportForm(string initialPath) : this(initialPath, null, null, null, false) { }
@@ -292,7 +295,7 @@ namespace AxisVM_plugin.UI
 
             lblLinkStatus = new Label { Location = new Point(16, 74), Size = new Size(548, 112), ForeColor = SystemColors.GrayText };
 
-            GroupBox grpFrom = new GroupBox { Text = "From Rhino", Location = new Point(16, 196), Size = new Size(548, 132) };
+            GroupBox grpFrom = new GroupBox { Text = "From Rhino", Location = new Point(16, 196), Size = new Size(548, 162) };
             Label lblFrom = new Label
             {
                 Location = new Point(16, 24),
@@ -304,9 +307,16 @@ namespace AxisVM_plugin.UI
             };
             btnLinkLoad = new Button { Text = "Load from Rhino", Location = new Point(388, 26), Size = new Size(144, 34), Font = new Font(this.Font, FontStyle.Bold) };
             btnLinkLoad.Click += delegate { CloseFor(FormAction.LoadFromRhino); };
-            grpFrom.Controls.AddRange(new Control[] { lblFrom, btnLinkLoad });
+            chkRemesh = new CheckBox
+            {
+                Text = "Mesh the rebuilt domains again afterwards (all at once - slow on large models)",
+                Location = new Point(16, 130),
+                AutoSize = true,
+                Checked = false
+            };
+            grpFrom.Controls.AddRange(new Control[] { lblFrom, btnLinkLoad, chkRemesh });
 
-            GroupBox grpTo = new GroupBox { Text = "To Rhino", Location = new Point(16, 340), Size = new Size(548, 150) };
+            GroupBox grpTo = new GroupBox { Text = "To Rhino", Location = new Point(16, 370), Size = new Size(548, 150) };
             Label lblTo = new Label
             {
                 Location = new Point(16, 24),

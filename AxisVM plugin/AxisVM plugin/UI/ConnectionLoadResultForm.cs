@@ -18,13 +18,22 @@ namespace AxisVM_plugin.UI
     ///  - "Checks": the self-checks.
     /// Every critical row carries the full concurrent vector of its combination. CSV / clipboard export and a
     /// button that selects the corresponding nodes and lines in AxisVM for a visual check.
+    /// The panel on the right switches the coordinate system / custom angles: every table is recomputed from the
+    /// loads already read (no new AxisVM call), and the axis triad on the model follows when it is shown.
     /// </summary>
     public class ConnectionLoadResultForm : Form
     {
         private readonly ExtractionResult result;
         private readonly Action<IEnumerable<int>, IEnumerable<int>> selectInModel; // (nodes, lines)
+        private readonly Func<LoadSystem, CustomAxes, string> showAxes;            // null = no model to draw on
+        private readonly Action hideAxes;
+        private bool axesShown;
 
         private TabControl tabs;
+        private ComboBox cmbAxes;
+        private AxisRotationEditor editor;
+        private Button btnShowAxes;
+        private readonly Timer recomputeTimer = new Timer { Interval = 300 };
 
         /// <summary>What a tab shows: its grid (null for Checks) and the text it copies.</summary>
         private class TabContent
@@ -43,22 +52,97 @@ namespace AxisVM_plugin.UI
         private const int ColFirstComp = 9;    // first of the six concurrent components
 
         public ConnectionLoadResultForm(ExtractionResult result, Action<IEnumerable<int>, IEnumerable<int>> selectInModel)
+            : this(result, selectInModel, null, null, false) { }
+
+        public ConnectionLoadResultForm(ExtractionResult result, Action<IEnumerable<int>, IEnumerable<int>> selectInModel,
+            Func<LoadSystem, CustomAxes, string> showAxes, Action hideAxes, bool axesShown)
         {
             this.result = result;
             this.selectInModel = selectInModel;
+            this.showAxes = showAxes;
+            this.hideAxes = hideAxes;
             InitializeComponent();
+
+            // The dialog had the triad on: redraw it for the final choice once the window is up
+            if (axesShown && showAxes != null) Shown += delegate { ToggleAxes(); };
+            FormClosed += delegate
+            {
+                recomputeTimer.Stop();
+                if (this.axesShown) hideAxes();
+            };
         }
 
         private void InitializeComponent()
         {
             Theme.Initialize(this);
-            Text = "Connection Loads - " + result.Axes + " axes";
-            ClientSize = new Size(1150, 560);
+            Text = "Connection Loads - " + result.AxesText;
+            ClientSize = new Size(1250, 600);
             StartPosition = FormStartPosition.CenterParent;
-            MinimumSize = new Size(700, 350);
+            MinimumSize = new Size(900, 520);
             MinimizeBox = false;
 
-            tabs = new TabControl { Location = new Point(8, 8), Size = new Size(1134, 500), Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
+            // Tables on the left, the axes panel on the right; one container so the themed layout fills it
+            Panel main = new Panel { Location = new Point(8, 8), Size = new Size(1234, 500) };
+            tabs = new TabControl { Dock = DockStyle.Fill };
+            Panel side = new Panel { Dock = DockStyle.Right, Width = 344, Padding = new Padding(12, 4, 4, 4) };
+            Label lblAxes = new Label { Text = "Coordinate system (tables update straight away):", Location = new Point(12, 4), AutoSize = true };
+            cmbAxes = new ComboBox { Location = new Point(12, 26), Size = new Size(324, 24), DropDownStyle = ComboBoxStyle.DropDownList };
+            cmbAxes.Items.AddRange(new object[] { "Local (N, Vy, Vz, Tx, My, Mz)", "Global (Fx, Fy, Fz, Mx, My, Mz)", "Custom: rotated global (Fx', Fy', Fz', ...)" });
+            cmbAxes.SelectedIndex = result.Axes == LoadSystem.Local ? 0 : result.Axes == LoadSystem.Custom ? 2 : 1;
+            editor = new AxisRotationEditor(324, 300) { Location = new Point(12, 60), Value = result.Custom };
+            editor.SetSystem(result.Axes, FirstLocalFrame());
+            side.Controls.AddRange(new Control[] { lblAxes, cmbAxes, editor });
+            main.Controls.Add(tabs);
+            main.Controls.Add(side);
+            tabs.BringToFront(); // the Fill control docks last, after the side panel took its width
+
+            cmbAxes.SelectedIndexChanged += delegate { AxesChanged(); };
+            editor.ValueChanged += delegate { AxesChanged(); };
+            recomputeTimer.Tick += delegate { recomputeTimer.Stop(); ApplyAxes(); };
+
+            BuildTabs();
+
+            // Buttons along the bottom
+            Button btnExportAll = MakeButton("Export all (CSV)", 8, 150);
+            btnExportAll.Click += delegate { FlushAxes(); SaveCsv("ConnectionLoads_all.csv", WithAxes(AllHeader()), WithAxes(AllRows())); };
+            Button btnExportCrit = MakeButton("Export critical (CSV)", 164, 150);
+            btnExportCrit.Click += delegate { FlushAxes(); SaveCsv("ConnectionLoads_critical.csv", WithAxes(CriticalHeader()), WithAxes(CriticalRows(result.Critical))); };
+            Button btnCopy = MakeButton("Copy tab (TSV)", 320, 130);
+            btnCopy.Click += delegate { FlushAxes(); CopyActiveTab(); };
+            Button btnSelect = MakeButton("Select in model", 456, 130);
+            btnSelect.Click += delegate { SelectFromActiveTab(); };
+            btnShowAxes = MakeButton("Show axes in model", 592, 150);
+            btnShowAxes.Enabled = showAxes != null;
+            btnShowAxes.Click += delegate { ToggleAxes(); };
+
+            Label lblHint = new Label
+            {
+                Text = "Select in model: the highlighted grid rows, or every target node and line if no row is highlighted.",
+                Location = new Point(750, 522),
+                Size = new Size(400, 30),
+                ForeColor = SystemColors.GrayText,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+            };
+
+            // The window is modeless: a button's DialogResult only closes MODAL forms, so close explicitly
+            Button btnClose = new Button { Text = "Close", Location = new Point(1162, 520), Size = new Size(80, 27), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
+            btnClose.Click += delegate { Close(); };
+
+            // Esc closes too (handled here because AxisVM's message loop does not do dialog-key processing)
+            KeyPreview = true;
+            KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) Close(); };
+
+            Controls.AddRange(new Control[] { main, btnExportAll, btnExportCrit, btnCopy, btnSelect, btnShowAxes, lblHint, btnClose });
+            Theme.ApplyResults(this, "Connection loads", "Summary, six critical components and all results. Switch or rotate the axes on the right; export CSV or select rows in the model.");
+        }
+
+        /// <summary>(Re)fills every tab for the current axes, keeping the tab the user is on.</summary>
+        private void BuildTabs()
+        {
+            int selected = tabs.SelectedIndex;
+            tabs.SuspendLayout();
+            foreach (TabPage p in tabs.TabPages.Cast<TabPage>().ToList()) { tabs.TabPages.Remove(p); p.Dispose(); }
+            content.Clear();
             string[] names = ConnectionLoadMath.Names(result.Axes);
 
             // Summary first: Max+ / Min- of every component over all ends - the answer the user came for
@@ -97,35 +181,85 @@ namespace AxisVM_plugin.UI
             tabs.TabPages.Add(pChecks);
             content[pChecks] = new TabContent { Grid = null, CopyText = () => string.Join(Environment.NewLine, result.Checks) };
 
-            // Buttons along the bottom
-            Button btnExportAll = MakeButton("Export all (CSV)", 8, 150);
-            btnExportAll.Click += delegate { SaveCsv("ConnectionLoads_all.csv", AllHeader(), AllRows()); };
-            Button btnExportCrit = MakeButton("Export critical (CSV)", 164, 150);
-            btnExportCrit.Click += delegate { SaveCsv("ConnectionLoads_critical.csv", CriticalHeader(), CriticalRows(result.Critical)); };
-            Button btnCopy = MakeButton("Copy tab (TSV)", 320, 130);
-            btnCopy.Click += delegate { CopyActiveTab(); };
-            Button btnSelect = MakeButton("Select in model", 456, 130);
-            btnSelect.Click += delegate { SelectFromActiveTab(); };
+            if (selected >= 0 && selected < tabs.TabCount) tabs.SelectedIndex = selected;
+            tabs.ResumeLayout();
+        }
 
-            Label lblHint = new Label
+        // ------------------------------------------------------------------
+        // Axes: switch / rotate, and the triad on the model
+        // ------------------------------------------------------------------
+
+        private LoadSystem SelectedSystem
+        {
+            get { return cmbAxes.SelectedIndex == 0 ? LoadSystem.Local : cmbAxes.SelectedIndex == 2 ? LoadSystem.Custom : LoadSystem.Global; }
+        }
+
+        /// <summary>The preview follows at once; the tables (and the model triad) after a short pause, so typing stays smooth.</summary>
+        private void AxesChanged()
+        {
+            editor.SetSystem(SelectedSystem, FirstLocalFrame());
+            recomputeTimer.Stop();
+            recomputeTimer.Start();
+        }
+
+        /// <summary>Applies a pending axes change now, so an export or copy never mixes two systems.</summary>
+        private void FlushAxes()
+        {
+            if (!recomputeTimer.Enabled) return;
+            recomputeTimer.Stop();
+            ApplyAxes();
+        }
+
+        private void ApplyAxes()
+        {
+            Cursor = Cursors.WaitCursor;
+            try
             {
-                Text = "Select in model: the highlighted grid rows, or every target node and line if no row is highlighted.",
-                Location = new Point(594, 522),
-                Size = new Size(460, 30),
-                ForeColor = SystemColors.GrayText,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
-            };
+                ConnectionLoadExtractorFunction.Recompute(result, SelectedSystem, editor.Value);
+                Text = "Connection Loads - " + result.AxesText;
+                BuildTabs();
+                Theme.Restyle(tabs);
+            }
+            finally { Cursor = Cursors.Default; }
+            if (axesShown) DrawAxes();
+        }
 
-            // The window is modeless: a button's DialogResult only closes MODAL forms, so close explicitly
-            Button btnClose = new Button { Text = "Close", Location = new Point(1062, 520), Size = new Size(80, 27), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
-            btnClose.Click += delegate { Close(); };
+        private void ToggleAxes()
+        {
+            if (axesShown)
+            {
+                hideAxes();
+                axesShown = false;
+                btnShowAxes.Text = "Show axes in model";
+                return;
+            }
+            axesShown = true;
+            btnShowAxes.Text = "Hide axes in model";
+            DrawAxes();
+        }
 
-            // Esc closes too (handled here because AxisVM's message loop does not do dialog-key processing)
-            KeyPreview = true;
-            KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) Close(); };
+        private void DrawAxes()
+        {
+            string error = showAxes(result.Axes, result.Custom);
+            if (error != null) MessageBox.Show(error, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
 
-            Controls.AddRange(new Control[] { tabs, btnExportAll, btnExportCrit, btnCopy, btnSelect, lblHint, btnClose });
-            Theme.ApplyResults(this, "Connection loads", "Summary, six critical components and all results. Export CSV or select rows in the model.");
+        private LocalFrame FirstLocalFrame() { return result.Ends.Count > 0 ? result.Ends[0].Frame : null; }
+
+        /// <summary>Exports name the axes in a last column, so a saved file can never be misread.</summary>
+        private List<string> WithAxes(List<string> header) { return header.Concat(new[] { "Axes" }).ToList(); }
+
+        private IEnumerable<IList<string>> WithAxes(IEnumerable<IList<string>> rows)
+        {
+            // Materialised now: the save dialog that follows lets the axes change before the rows would be read
+            string axes = result.AxesText;
+            return rows.Select(r => (IList<string>)r.Concat(new[] { axes }).ToList()).ToList();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) recomputeTimer.Dispose();
+            base.Dispose(disposing);
         }
 
         /// <summary>Adds a tab with a critical table for the given rows.</summary>

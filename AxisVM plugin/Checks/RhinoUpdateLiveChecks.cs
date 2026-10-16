@@ -85,12 +85,12 @@ internal static class RhinoUpdateLiveChecks
         return hits;
     }
 
-    private static ImportStats Import(RhinoModel rhino, string path, double lengthToM, bool update, List<string> notes, HashSet<string> known = null)
+    private static ImportStats Import(RhinoModel rhino, string path, double lengthToM, bool update, List<string> notes, HashSet<string> known = null, Dictionary<string, string> adoptedPanels = null)
     {
         var opt = new ImportOptions
         {
             Units = new AxUnits { LengthToM = lengthToM, LengthName = lengthToM < 1 ? "mm" : "m" },
-            MergeToleranceM = 0.001, AutoIntersect = true, SourcePath = path, ReplacePrevious = update, RhinoKnownGuids = known
+            MergeToleranceM = 0.001, AutoIntersect = true, SourcePath = path, ReplacePrevious = update, RhinoKnownGuids = known, AdoptedPanels = adoptedPanels
         };
         var builder = new AxisModelBuilder(app, model, rhino, opt, notes);
         model.BeginUpdate();
@@ -206,7 +206,7 @@ internal static class RhinoUpdateLiveChecks
     {
         JsonValue root = LinkFile.Read(linkPath);
         RhinoModel rhino = RhinoModel.FromJson(root, notes);
-        Import(rhino, linkPath, lengthToM, true, notes, LinkFile.RhinoKnownGuids(root));
+        Import(rhino, linkPath, lengthToM, true, notes, LinkFile.RhinoKnownGuids(root), RhinoLinkSender.AdoptedPanels(root));
         rhinoSent = LinkFile.Get(root[LinkFile.RhinoSection], "sent");
         RhinoLinkSender.MarkLoaded(model, linkPath, rhinoSent);
     }

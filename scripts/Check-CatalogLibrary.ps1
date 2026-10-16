@@ -24,7 +24,7 @@ New-Item -ItemType Directory $temp | Out-Null
 # ---- AxisVM-side checker (export + import modes) ---------------------------------------------------------
 $core = Join-Path $repo 'AxisVM plugin\AxisVM plugin'
 $sources = @('Core\AxisModelBuilder.cs', 'Core\AxisModelBuilder.Elements.cs', 'Core\AxisModelBuilder.Surfaces.cs', 'Core\AxisModelBuilder.Loads.cs',
-    'Core\AxisModelBuilder.Helpers.cs', 'Core\AxisModelBuilder.Link.cs', 'Core\LinkFile.cs', 'Core\LinkState.cs', 'Core\LinkLibrary.cs', 'Core\RhinoLinkSender.cs', 'Core\SpringParamResolver.cs', 'Core\AttributeParser.cs', 'Core\CatalogResolver.cs', 'Core\CatalogExport.cs',
+    'Core\AxisModelBuilder.Helpers.cs', 'Core\AxisModelBuilder.Link.cs', 'Core\LinkFile.cs', 'Core\LinkState.cs', 'Core\LinkLibrary.cs', 'Core\LinkLoads.cs', 'Core\RhinoLinkSender.cs', 'Core\SpringParamResolver.cs', 'Core\AttributeParser.cs', 'Core\CatalogResolver.cs', 'Core\CatalogExport.cs',
     'Core\Json.cs', 'Core\RhinoModelDto.cs', 'Core\AxisVMHelper.cs', 'Functions\OneWayPanelBuilder.cs', 'Functions\EdgeChainBuilder.cs') | ForEach-Object { Join-Path $core $_ }
 $axisExe = Join-Path $temp 'RhinoImportCatalogLiveChecks.exe'
 Copy-Item $interop $temp   # a few interop types (struct arrays) cannot be embedded

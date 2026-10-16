@@ -90,9 +90,90 @@ namespace AxisVM_plugin.Core
         // Reading the model
         // ==================================================================
 
+        // ---- read cache ----------------------------------------------------------------------------------
+        // "Send to Rhino" reads every node, line and line property many times. Between BeginCache and EndCache those reads
+        // come from a few bulk calls made once (nothing in the model's geometry or properties changes during a send -
+        // only attachments are written), which turns tens of thousands of COM calls into a handful.
+
+        private static IAxisVMModel cached;
+        private static Dictionary<int, double[]> nodeCache;
+        private static Dictionary<int, int[]> lineNodeCache;
+        private static Dictionary<int, bool> arcCache;
+        private static Dictionary<int, RLineAttr> attrCache;
+        private static Dictionary<int, string> sectionCache, materialCache;
+
+        public static void BeginCache(IAxisVMModel model)
+        {
+            EndCache();
+            nodeCache = new Dictionary<int, double[]>();
+            lineNodeCache = new Dictionary<int, int[]>();
+            arcCache = new Dictionary<int, bool>();
+            attrCache = new Dictionary<int, RLineAttr>();
+            sectionCache = new Dictionary<int, string>();
+            materialCache = new Dictionary<int, string>();
+            try
+            {
+                int n = model.Nodes.Count;
+                if (n > 0)
+                {
+                    Array coords;
+                    if (model.Nodes.BulkGetCoord(Ids(n), out coords) > 0 && coords != null)
+                    {
+                        int lo = coords.GetLowerBound(0);
+                        for (int i = 0; i < coords.Length && i < n; i++)
+                        {
+                            RPoint3d p = (RPoint3d)coords.GetValue(lo + i);
+                            nodeCache[i + 1] = new[] { p.x, p.y, p.z };
+                        }
+                    }
+                }
+            }
+            catch { nodeCache.Clear(); }
+            try
+            {
+                int n = model.Lines.Count;
+                if (n > 0)
+                {
+                    Array data, attrs;
+                    if (model.Lines.BulkGetLineData(Ids(n), out data) > 0 && data != null)
+                    {
+                        int lo = data.GetLowerBound(0);
+                        for (int i = 0; i < data.Length && i < n; i++)
+                        {
+                            RLineData d = (RLineData)data.GetValue(lo + i);
+                            lineNodeCache[i + 1] = new[] { d.NodeId1, d.NodeId2 };
+                            arcCache[i + 1] = d.GeomType == ELineGeomType.lgtCircleArc;
+                        }
+                    }
+                    if (model.Lines.BulkGetAttr(Ids(n), out attrs) > 0 && attrs != null)
+                    {
+                        int lo = attrs.GetLowerBound(0);
+                        for (int i = 0; i < attrs.Length && i < n; i++) attrCache[i + 1] = (RLineAttr)attrs.GetValue(lo + i);
+                    }
+                }
+            }
+            catch { lineNodeCache.Clear(); arcCache.Clear(); attrCache.Clear(); }
+            cached = model;
+        }
+
+        public static void EndCache()
+        {
+            cached = null;
+            nodeCache = null; lineNodeCache = null; arcCache = null; attrCache = null; sectionCache = null; materialCache = null;
+        }
+
+        private static Array Ids(int count)
+        {
+            Array ids = Array.CreateInstance(typeof(int), new[] { count }, new[] { 1 });
+            for (int i = 1; i <= count; i++) ids.SetValue(i, i);
+            return ids;
+        }
+
         public static double[] NodeXyz(IAxisVMModel model, int nodeId)
         {
             if (nodeId <= 0) return null;
+            double[] hit;
+            if (cached == model && nodeCache != null && nodeCache.TryGetValue(nodeId, out hit)) return hit;
             try
             {
                 RPoint3d p = new RPoint3d();
@@ -105,6 +186,7 @@ namespace AxisVM_plugin.Core
         public static bool TryLineAttr(IAxisVMModel model, int lineId, out RLineAttr attr)
         {
             attr = new RLineAttr();
+            if (cached == model && attrCache != null && attrCache.TryGetValue(lineId, out attr)) return true;
             try
             {
                 Array ids = Array.CreateInstance(typeof(int), new[] { 1 }, new[] { 1 });
@@ -121,13 +203,21 @@ namespace AxisVM_plugin.Core
         public static string SectionName(IAxisVMModel model, int index)
         {
             if (index <= 0) return "";
-            try { return (model.CrossSections.Item[index].Name ?? "").Trim(); } catch { return ""; }
+            string hit;
+            if (cached == model && sectionCache != null && sectionCache.TryGetValue(index, out hit)) return hit;
+            try { hit = (model.CrossSections.Item[index].Name ?? "").Trim(); } catch { hit = ""; }
+            if (cached == model && sectionCache != null) sectionCache[index] = hit;
+            return hit;
         }
 
         public static string MaterialName(IAxisVMModel model, int index)
         {
             if (index <= 0) return "";
-            try { return (model.Materials.Item[index].Name ?? "").Trim(); } catch { return ""; }
+            string hit;
+            if (cached == model && materialCache != null && materialCache.TryGetValue(index, out hit)) return hit;
+            try { hit = (model.Materials.Item[index].Name ?? "").Trim(); } catch { hit = ""; }
+            if (cached == model && materialCache != null) materialCache[index] = hit;
+            return hit;
         }
 
         /// <summary>Ax_Type spelling of an AxisVM line type ("" for types the link does not carry).</summary>
@@ -154,6 +244,8 @@ namespace AxisVM_plugin.Core
 
         public static bool IsArc(IAxisVMModel model, int lineId)
         {
+            bool hit;
+            if (cached == model && arcCache != null && arcCache.TryGetValue(lineId, out hit)) return hit;
             try { return model.Lines.Item[lineId].GeomType == ELineGeomType.lgtCircleArc; } catch { return false; }
         }
 
@@ -194,6 +286,8 @@ namespace AxisVM_plugin.Core
 
         public static int[] LineNodes(IAxisVMModel model, int lineId)
         {
+            int[] hit;
+            if (cached == model && lineNodeCache != null && lineNodeCache.TryGetValue(lineId, out hit)) return hit;
             try
             {
                 IAxisVMLine ln = model.Lines.Item[lineId];
@@ -253,7 +347,7 @@ namespace AxisVM_plugin.Core
         public static string LineState(IAxisVMModel model, int lineId)
         {
             int[] n = LineNodes(model, lineId);
-            string geom = n == null ? "?" : F(NodeXyz(model, n[0])) + ";" + F(NodeXyz(model, n[1]));
+            string geom = n == null ? "?" : EndPair(F(NodeXyz(model, n[0])), F(NodeXyz(model, n[1])));
             if (IsArc(model, lineId)) geom += ";arc " + F(ArcMid(model, lineId));
 
             RLineAttr a;
@@ -261,6 +355,25 @@ namespace AxisVM_plugin.Core
             string type = LineTypeName(a.LineType);
             if (type.Length == 0) type = "other" + (int)a.LineType;
             return string.Join("|", geom, type, SectionName(model, a.StartCrossSectionIndex), SectionName(model, a.EndCrossSectionIndex), MaterialName(model, a.MaterialIndex));
+        }
+
+        /// <summary>
+        /// A line's two end points in a fixed order. The end order is not geometry: LineNodes gives the definition order
+        /// from the bulk cache but the local-x order (which the import flips to follow the Rhino curve) otherwise.
+        /// </summary>
+        private static string EndPair(string a, string b)
+        {
+            return string.CompareOrdinal(a, b) <= 0 ? a + ";" + b : b + ";" + a;
+        }
+
+        /// <summary>The geometry field of a line state with its end points in fixed order (also for baselines written before that).</summary>
+        public static string LineGeom(string geomField)
+        {
+            if (string.IsNullOrEmpty(geomField)) return geomField ?? "";
+            string[] p = geomField.Split(';');
+            if (p.Length < 2) return geomField;
+            string rest = p.Length > 2 ? ";" + string.Join(";", p, 2, p.Length - 2) : "";
+            return EndPair(p[0], p[1]) + rest;
         }
 
         /// <summary>The sorted end-point pairs of some lines: the shape of a domain or load panel outline, order independent.</summary>
@@ -272,6 +385,39 @@ namespace AxisVM_plugin.Core
                 int[] n = LineNodes(model, l);
                 if (n == null) continue;
                 string a = F(NodeXyz(model, n[0])), b = F(NodeXyz(model, n[1]));
+                segs.Add(string.CompareOrdinal(a, b) < 0 ? a + ">" + b : b + ">" + a);
+            }
+            segs.Sort(StringComparer.Ordinal);
+            return string.Join(";", segs);
+        }
+
+        /// <summary>The corners of a load panel drawn as a free polygon (no lines behind it), in order; null when unreadable.</summary>
+        public static List<double[]> PanelPolygon(IAxisVMModel model, int panel)
+        {
+            try
+            {
+                AxisVMLines3d poly;
+                model.LoadPanels.Item[panel].GetContourPolygon(out poly);
+                if (poly == null || poly.Count < 3) return null;
+                List<double[]> pts = new List<double[]>();
+                for (int k = 1; k <= poly.Count; k++)
+                {
+                    RLine3d l = new RLine3d();
+                    poly.GetItem(k, ref l);
+                    pts.Add(new[] { l.P1.x, l.P1.y, l.P1.z });
+                }
+                return pts;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>The outline of a polygon as its sorted edges - the identity of a polygon load panel (order independent).</summary>
+        public static string PolygonState(List<double[]> pts)
+        {
+            List<string> segs = new List<string>();
+            for (int i = 0; i < pts.Count; i++)
+            {
+                string a = F(pts[i]), b = F(pts[(i + 1) % pts.Count]);
                 segs.Add(string.CompareOrdinal(a, b) < 0 ? a + ">" + b : b + ">" + a);
             }
             segs.Sort(StringComparer.Ordinal);

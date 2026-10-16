@@ -24,7 +24,8 @@ namespace AxisVM_plugin.Core
     public enum LoadSystem
     {
         Local,   // the member's own x (along the bar), y, z
-        Global   // the model's X, Y, Z
+        Global,  // the model's X, Y, Z
+        Custom   // the global axes turned about Z, then about the new x' (see CustomAxes)
     }
 
     /// <summary>Which extreme a critical row represents.</summary>
@@ -100,6 +101,22 @@ namespace AxisVM_plugin.Core
         /// <summary>The same frame turned 180 degrees about local z: x and y reverse, z stays.</summary>
         public LocalFrame FlippedAboutZ() { return new LocalFrame(-Ex, -Ey, Ez); }
 
+        /// <summary>The model's own X, Y, Z.</summary>
+        public static LocalFrame GlobalAxes { get { return new LocalFrame(new Vec3(1, 0, 0), new Vec3(0, 1, 0), new Vec3(0, 0, 1)); } }
+
+        /// <summary>
+        /// This frame turned by <paramref name="azDeg"/> about its z, then by <paramref name="axDeg"/> about the
+        /// new x. Angles in degrees, positive by the right-hand rule: the first turns x toward y, the second turns
+        /// y toward z.
+        /// </summary>
+        public LocalFrame RotatedZX(double azDeg, double axDeg)
+        {
+            double az = azDeg * Math.PI / 180, ax = axDeg * Math.PI / 180;
+            double cz = Math.Cos(az), sz = Math.Sin(az), cx = Math.Cos(ax), sx = Math.Sin(ax);
+            Vec3 x1 = cz * Ex + sz * Ey, y1 = -sz * Ex + cz * Ey; // about z: z stays
+            return new LocalFrame(x1, cx * y1 + sx * Ez, -sx * y1 + cx * Ez); // about x1: x1 stays
+        }
+
         /// <summary>
         /// Largest deviation from an orthonormal, right-handed frame:
         /// |each axis| - 1, pairwise dot products, and (Ex x Ey) - Ez. Zero for a perfect frame.
@@ -122,6 +139,27 @@ namespace AxisVM_plugin.Core
 
         /// <summary>Global -> local for one 3-vector (projection onto each axis).</summary>
         public Vec3 ToLocal(Vec3 global) { return new Vec3(Vec3.Dot(global, Ex), Vec3.Dot(global, Ey), Vec3.Dot(global, Ez)); }
+    }
+
+    /// <summary>
+    /// The Custom coordinate system: the global axes turned by AzDeg about Z, then by AxDeg about the new x'.
+    /// y' follows by the right-hand rule. x' always stays in the global XY plane.
+    /// </summary>
+    public class CustomAxes
+    {
+        public readonly double AzDeg; // about global Z: x' turns from X toward Y
+        public readonly double AxDeg; // then about x': y' turns toward Z
+
+        public CustomAxes(double azDeg, double axDeg) { AzDeg = azDeg; AxDeg = axDeg; }
+
+        /// <summary>x', y', z' in global coordinates.</summary>
+        public LocalFrame Frame { get { return LocalFrame.GlobalAxes.RotatedZX(AzDeg, AxDeg); } }
+
+        /// <summary>"Custom: αz = 30°, αx = 0°".</summary>
+        public string Describe()
+        {
+            return string.Format(CultureInfo.InvariantCulture, "Custom: αz = {0:0.#}°, αx = {1:0.#}°", AzDeg, AxDeg);
+        }
     }
 
     /// <summary>Result of the max+/min- search over one list of values.</summary>
@@ -147,8 +185,14 @@ namespace AxisVM_plugin.Core
         /// <summary>Component names for the global system, in vector order.</summary>
         public static readonly string[] GlobalNames = { "Fx", "Fy", "Fz", "Mx", "My", "Mz" };
 
+        /// <summary>Component names for the custom (rotated global) system, in vector order.</summary>
+        public static readonly string[] CustomNames = { "Fx'", "Fy'", "Fz'", "Mx'", "My'", "Mz'" };
+
         /// <summary>Names of the six components in the given system.</summary>
-        public static string[] Names(LoadSystem system) { return system == LoadSystem.Local ? LocalNames : GlobalNames; }
+        public static string[] Names(LoadSystem system)
+        {
+            return system == LoadSystem.Local ? LocalNames : system == LoadSystem.Custom ? CustomNames : GlobalNames;
+        }
 
         /// <summary>Unit of component <paramref name="index"/>: forces kN, moments kNm.</summary>
         public static string Unit(int index) { return index < 3 ? "kN" : "kNm"; }

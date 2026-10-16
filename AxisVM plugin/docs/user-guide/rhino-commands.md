@@ -22,7 +22,7 @@ The Rhino plug-in adds ten commands that all start with `Ax`. You tag Rhino geom
 | `AxVisualize` | nothing | Opens the AxVisualize window and draws supports, releases, load arrows and element info in the viewports. Run again or close the window to turn it off. |
 | `AxClear` | any objects | Removes all `Ax_*` attributes from the selected objects. |
 | `AxUpdateGuid` | nothing (whole file) | Gives copied objects a fresh `Ax_Guid` so duplicates do not share an id. |
-| `AxLayerTidyUp` | nothing (whole file) | Moves tagged objects into the layer tree `AxLayer :: AxLine / AxDomain / AxLoadPanel / AxPoint :: type`. |
+| `AxLayerTidyUp` | nothing (whole file) | Moves tagged objects into the layer tree `AxLayer :: Members / Domains / LoadPanels / Nodes :: type :: property`. |
 | `AxExport` | optional | Writes the JSON file for AxisVM. |
 
 ## AxPoint: nodes
@@ -35,7 +35,7 @@ Select points and run `AxPoint`. The **Support** tab sets the nodal support (fix
 
 ## AxLine: members
 
-Select curves and run `AxLine`. You can also select surface, polysurface or mesh edges: each edge is copied to a new curve on `AxLayer::AxLine::EdgeHinge`, typed as an edge hinge (the slab itself is not changed). Cancelling the dialog removes those copies again. Choose the **Element type** in the strip under the header; the tabs below change with the type.
+Select curves and run `AxLine`. You can also select surface, polysurface or mesh edges: each edge is copied to a new curve on `AxLayer::Members::EdgeHinge`, typed as an edge hinge (the slab itself is not changed). Cancelling the dialog removes those copies again. Choose the **Element type** in the strip under the header; the tabs below change with the type.
 
 - **Member:** material and cross-section (pick from the library with **Library...**, type an AxisVM catalog name such as `S355`, `IPE300`, or a size such as `300x500`), end releases, local z reference and eccentricity.
 - **Spring / link** and **Support** appear for the types that use them.
@@ -77,8 +77,8 @@ The list comes from AxisVM. Once per computer (and again after an AxisVM update)
 
 ## Check, clean up, export
 
-- **`AxVisualize`** opens a small window and draws the model's attributes in the viewports: one label per element (type, section, material), support symbols (sphere = pinned, block = fixed, ball on a plate = roller, orange = custom stiffness), release markers near each member end (red = released, orange = semi-rigid), span arrows on one-way panels, and the load arrows of the load case you pick (one case at a time, arrow length scales with the value). Use the check boxes to choose what is shown and the sliders to size symbols and arrows. It is display only: nothing is added to the model, nothing can be selected, and nothing is exported. Local loads use a simplified member frame (x along the member, z up). Close the window or run `AxVisualize` again to turn it off. Files with the old text-dot tags (`AxTag` layers) are cleaned up automatically.
-- **`AxLayerTidyUp`** sorts tagged objects into tidy layers without changing their attributes.
+- **`AxVisualize`** opens a small window and draws the model's attributes in the viewports: one label per element (type, section, material), support symbols (sphere = pinned, block = fixed, ball on a plate = roller, orange = custom stiffness), release markers near each member end (red = released, orange = semi-rigid), span arrows on one-way panels, and the load arrows of the load case you pick (one case at a time, arrow length scales with the value). Tick element types under **Elements** (Beam, Plate, Node, ...) to show only those, use the check boxes to choose what is shown and the sliders to size symbols and arrows. It is display only: nothing is added to the model, nothing can be selected, and nothing is exported. Local loads use a simplified member frame (x along the member, z up). Close the window or run `AxVisualize` again to turn it off. Files with the old text-dot tags (`AxTag` layers) are cleaned up automatically.
+- **`AxLayerTidyUp`** sorts tagged objects into tidy layers without changing their attributes: one layer per element type and, under it, one per defining property. Beams, ribs and trusses are split by section and material (`Members::Beam::IPE 300 · S 355`), domains by material and thickness (`Domains::Plate::C30-37 · t=200`), load panels into `LoadPanels::OneWay` / `TwoWay`, line supports (`Simple`) and nodes by support kind (`Nodes::Support · Pinned`, `NodalLoad`). Springs, links and hinges get one layer per type. `/` in names becomes `-`. Layers under `AxLayer` that end up empty (for example from older runs) are removed.
 - **`AxUpdateGuid`** is for copied or pasted members. Run it before exporting a model that was built by copying.
 - **`AxExport`** first shows two options in the command line: **Scope** (`All` or `OnlySelected`; selected objects are the default when something is selected) and **Untagged** (`Skip` or `Include`, which exports untagged geometry as plain geometry). Press Enter, choose where to save the JSON file, and read the summary: counts of points, members and surfaces, plus any warnings.
 

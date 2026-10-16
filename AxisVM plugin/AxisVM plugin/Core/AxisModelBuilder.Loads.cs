@@ -111,6 +111,8 @@ namespace AxisVM_plugin.Core
                 int lc = catalog.LoadCase(load.LoadCase);
                 if (lc <= 0) continue;
 
+                if (OnMemberPoint(job, Math.Max(0, Math.Min(total, at)), lc, load)) continue;
+
                 double local;
                 SegRef seg = Locate(job.Chain, Math.Max(0, Math.Min(total, at)), out local);
                 if (seg == null) continue;
@@ -146,8 +148,89 @@ namespace AxisVM_plugin.Core
                 int lc = catalog.LoadCase(load.LoadCase);
                 if (lc <= 0) continue;
 
+                if (OnMemberDist(job, from, to, lc, load)) continue;
                 AddMemberDistLoad(job, from, to, lc, load);
             }
+        }
+
+        /// <summary>
+        /// The member a curve became and whether it runs against the curve (its start node is the curve's end). False
+        /// when the curve is not exactly one member - its loads then go on its lines one by one.
+        /// </summary>
+        private bool MemberOf(LineJob job, out int member, out bool reversed)
+        {
+            reversed = false;
+            if (!memberOfJob.TryGetValue(job, out member) || job.Chain.Segs.Count == 0) return false;
+            try
+            {
+                int start = model.Members.Item[member].StartNode;
+                SegRef first = job.Chain.Segs[0], last = job.Chain.Segs[job.Chain.Segs.Count - 1];
+                if (start == first.CurveStartNode) return true;
+                if (start == last.CurveEndNode) { reversed = true; return true; }
+            }
+            catch { }
+            return false;
+        }
+
+        /// <summary>
+        /// A point load as one AxisVM member load (what AxisVM itself makes and what "Send to Rhino" reads back), so a
+        /// round trip keeps one load per Rhino load. Positions are from the member's start node.
+        /// </summary>
+        private bool OnMemberPoint(LineJob job, double at, int lc, PointLoadSpec load)
+        {
+            int member;
+            bool reversed;
+            if (!MemberOf(job, out member, out reversed)) return false;
+            ESystem sys = load.System == LoadSystem.Local ? ESystem.sysLocal : ESystem.sysGlobal;
+            // A member running against the curve with a local load: its lines' local x follow the curve, so which way
+            // the member load's local axes point is not certain - the per-line path handles that exactly.
+            if (reversed && sys == ESystem.sysLocal) return false;
+            double[] f = (double[])load.F.Clone();
+            try
+            {
+                RLoadMemberConcentrated rec = new RLoadMemberConcentrated();
+                rec.LoadCaseId = lc; rec.MemberID = member; rec.SystemGLR = sys;
+                rec.Fgx = f[0]; rec.Fgy = f[1]; rec.Fgz = f[2];
+                rec.Mgx = f[3]; rec.Mgy = f[4]; rec.Mgz = f[5];
+                rec.Position = reversed ? job.Chain.Total - at : at;
+                if (model.Loads.AddMemberConcentrated(ref rec) <= 0) return false;
+                stats.LoadsCreated++;
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>A distributed load as one AxisVM member load (see <see cref="OnMemberPoint"/>).</summary>
+        private bool OnMemberDist(LineJob job, double from, double to, int lc, DistLoadSpec load)
+        {
+            int member;
+            bool reversed;
+            if (!MemberOf(job, out member, out reversed)) return false;
+            ESystem sys = load.System == LoadSystem.Local ? ESystem.sysLocal : ESystem.sysGlobal;
+            if (reversed && sys == ESystem.sysLocal) return false;   // see OnMemberPoint
+            double[] q1 = (double[])load.Q1.Clone(), q2 = (double[])load.Q2.Clone();
+            double p1 = from, p2 = to;
+            if (reversed)
+            {
+                p1 = job.Chain.Total - to; p2 = job.Chain.Total - from;
+                double[] t = q1; q1 = q2; q2 = t;
+            }
+            bool trapezoid = false;
+            for (int i = 0; i < 6; i++) if (Math.Abs(q1[i] - q2[i]) > 1e-12) trapezoid = true;
+            try
+            {
+                RLoadMemberDistributed rec = new RLoadMemberDistributed();
+                rec.LoadCaseId = lc; rec.MemberID = member; rec.SystemGLR = sys;
+                rec.qx1 = q1[0]; rec.qy1 = q1[1]; rec.qz1 = q1[2]; rec.mx1 = q1[3]; rec.my1 = q1[4]; rec.mz1 = q1[5];
+                rec.qx2 = q2[0]; rec.qy2 = q2[1]; rec.qz2 = q2[2]; rec.mx2 = q2[3]; rec.my2 = q2[4]; rec.mz2 = q2[5];
+                rec.Position1 = Math.Max(0, p1); rec.Position2 = Math.Max(0, p2);
+                rec.DistributionType = EBeamRibDistributionType.brdtLength;
+                rec.Trapezoid = trapezoid ? ELongBoolean.lbTrue : ELongBoolean.lbFalse;
+                if (model.Loads.AddMemberDistributed(ref rec) <= 0) return false;
+                stats.LoadsCreated++;
+                return true;
+            }
+            catch { return false; }
         }
 
         /// <summary>

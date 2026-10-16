@@ -32,6 +32,10 @@ internal static class AxisVmDialogGuard
     /// <summary>Button captions pressed, best first.</summary>
     private static readonly string[] Safe = { "No", "OK", "Cancel" };
 
+    /// <summary>Window classes of the AxisVM dialogs the guard may answer (message box, key chooser, recovery, save prompt, Windows dialog).</summary>
+    // TfrmErrorTree: AxisVM's error list (e.g. "Meshing error") - OK only acknowledges it.
+    private static readonly string[] KnownDialogs = { "TfrmAxMeN", "TfrmChooseKey", "TfrmRecover", "TfrmMentes", "TfrmErrorTree", "#32770" };
+
     /// <summary>
     /// The AxisVM process this check started, plus any process it starts itself (AxisVM restarts itself in a child process
     /// when its first license key is busy). The guard acts on nothing else - other AxisVMs on this machine (the user's,
@@ -220,6 +224,12 @@ internal static class AxisVmDialogGuard
         int pid;
         GetWindowThreadProcessId(window, out pid);
         if (!pids.Contains(pid) || !IsWindowVisible(window)) return;
+
+        // Only the dialogs known to block a check: message boxes, the license key chooser, file recovery, the save prompt.
+        // Never anything else - an analysis progress window also has a Cancel button, and pressing it stops a calculation.
+        StringBuilder windowClass = new StringBuilder(64);
+        GetClassName(window, windowClass, windowClass.Capacity);
+        if (Array.IndexOf(KnownDialogs, windowClass.ToString()) < 0) return;
 
         // Buttons of this window by caption ("&No" -> "No").
         Dictionary<string, IntPtr> buttons = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);

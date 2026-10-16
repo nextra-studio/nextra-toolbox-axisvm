@@ -279,6 +279,9 @@ namespace AxisVM_plugin.UI
         }
 
         /// <summary>Colours and grid readability; selection, sorting and values stay with each form.</summary>
+        /// <summary>Styles controls created after Apply / ApplyResults (e.g. grids rebuilt at run time).</summary>
+        public static void Restyle(Control parent) { StyleControls(parent); }
+
         private static void StyleControls(Control parent)
         {
             Control[] children = new Control[parent.Controls.Count];

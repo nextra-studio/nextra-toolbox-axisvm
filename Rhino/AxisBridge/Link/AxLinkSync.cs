@@ -37,6 +37,7 @@ namespace AxisBridge.Link
         public const string AxisVmSection = "axisvm";
         public const string MembersLayer = "AxisVM::Members";
         public const string DomainsLayer = "AxisVM::Domains";
+        public const string PointsLayer = "AxisVM::Points";
 
         // ==================================================================
         // Per-document memory
@@ -244,7 +245,7 @@ namespace AxisBridge.Link
             {
                 foreach (JToken e in (ax["lines"] as JArray) ?? new JArray()) ApplyLine(doc, e, scale, res, created);
                 foreach (JToken e in (ax["domains"] as JArray) ?? new JArray()) ApplyDomain(doc, e, scale, tol, res, created);
-                foreach (JToken e in (ax["points"] as JArray) ?? new JArray()) ApplyPoint(doc, e, scale, res);
+                foreach (JToken e in (ax["points"] as JArray) ?? new JArray()) ApplyPoint(doc, e, scale, res, created);
 
                 List<RhinoObject> gone = new List<RhinoObject>();
                 foreach (JToken g in (ax["deleted"] as JArray) ?? new JArray())
@@ -270,6 +271,18 @@ namespace AxisBridge.Link
                         foreach (RhinoObject obj in gone) obj.Select(true);
                         res.Notes.Add(gone.Count + " object(s) deleted in AxisVM were kept here and are selected. The next AxisVM 'Load from Rhino' brings them back there.");
                     }
+                }
+
+                // Sort everything into the AxLayer tree by type and property, coloured, slabs and panels see-through
+                // (the same as AxLayerTidyUp), so a model loaded from AxisVM is readable at once.
+                AxisBridge.Commands.AxLayerTidyUpCommand.Tidy(doc, false);
+                AxLayers.DeleteEmptyUnder(doc, "AxisVM");
+                int axisvmLayer = doc.Layers.FindByFullPath("AxisVM", RhinoMath.UnsetIntIndex);
+                if (axisvmLayer >= 0 && axisvmLayer != doc.Layers.CurrentLayerIndex)
+                {
+                    RhinoObject[] left = doc.Objects.FindByLayer(doc.Layers[axisvmLayer]);
+                    Layer[] kids = doc.Layers[axisvmLayer].GetChildren();
+                    if ((left == null || left.Length == 0) && (kids == null || kids.Length == 0)) doc.Layers.Delete(axisvmLayer, true);
                 }
             }
             finally
@@ -467,16 +480,30 @@ namespace AxisBridge.Link
             return true;
         }
 
-        private static void ApplyPoint(RhinoDoc doc, JToken e, double scale, LoadResult res)
+        private static void ApplyPoint(RhinoDoc doc, JToken e, double scale, LoadResult res, List<string> created)
         {
             if (!Changed(e)) { res.Unchanged++; return; }
-            RhinoObject obj = Find(doc, Str(e, "guid"));
-            if (obj == null || e["xyz"] == null) return;
+            string guid = Str(e, "guid");
+            RhinoObject obj = Find(doc, guid);
+            if (e["xyz"] == null) return;
             Point3d p = Pt(e["xyz"], scale);
+            if (obj == null)
+            {
+                // A node with nodal loads drawn in AxisVM.
+                if (!IsNew(e)) return;
+                ObjectAttributes a = NewAttributes(doc, guid, PointsLayer);
+                SetUserText(a, e["attrs"], scale);
+                if (doc.Objects.AddPoint(p, a) != Guid.Empty) { res.Created++; created.Add(guid); }
+                return;
+            }
             Point old = obj.Geometry as Point;
-            if (old != null && old.Location.DistanceTo(p) <= doc.ModelAbsoluteTolerance) return;
-            doc.Objects.Replace(obj.Id, p);
-            res.Moved++;
+            if (GeomChanged(e) && (old == null || old.Location.DistanceTo(p) > doc.ModelAbsoluteTolerance))
+            {
+                doc.Objects.Replace(obj.Id, p);
+                res.Moved++;
+                obj = doc.Objects.FindId(obj.Id);
+            }
+            if (UpdateUserText(doc, obj, e["attrs"], scale)) res.Updated++;
         }
 
         private static ObjectAttributes NewAttributes(RhinoDoc doc, string guid, string layer)
@@ -490,10 +517,24 @@ namespace AxisBridge.Link
             return a;
         }
 
-        /// <summary>Writes the sent Ax_* values; Ax_Thickness arrives in metres and is stored in model units.</summary>
+        /// <summary>
+        /// Writes the sent Ax_* values. Ax_Thickness and the "at=x,y,z" of surface point loads arrive in metres and are
+        /// stored in model units. A load family that arrives (Ax_DistLoad, Ax_DistLoad.1, ...) replaces the object's whole
+        /// family, so a load removed in AxisVM does not linger as Ax_DistLoad.3; an empty value clears the family.
+        /// </summary>
         private static void SetUserText(ObjectAttributes a, JToken attrs, double scale)
         {
             if (!(attrs is JObject o)) return;
+            HashSet<string> families = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (JProperty p in o.Properties())
+                if (AxKeys.IsFamily(AxKeys.BaseKey(p.Name))) families.Add(AxKeys.BaseKey(p.Name));
+            if (families.Count > 0)
+            {
+                var keys = a.GetUserStrings();
+                foreach (string k in keys.AllKeys)
+                    if (k != null && families.Contains(AxKeys.BaseKey(k))) a.DeleteUserString(k);
+            }
+
             foreach (JProperty p in o.Properties())
             {
                 string v = p.Value.ToString();
@@ -503,8 +544,28 @@ namespace AxisBridge.Link
                     if (double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out m))
                         v = (m * scale).ToString("0.###", CultureInfo.InvariantCulture);
                 }
+                else if (string.Equals(AxKeys.BaseKey(p.Name), AxKeys.PointLoad, StringComparison.OrdinalIgnoreCase)) v = ScaleAt(v, scale);
                 if (v.Length == 0) a.DeleteUserString(p.Name); else a.SetUserString(p.Name, v);
             }
+        }
+
+        /// <summary>"... at=x,y,z; ..." (a surface point load's position, metres) in model units; "at=ratio:..." stays.</summary>
+        private static string ScaleAt(string v, double scale)
+        {
+            string[] fields = v.Split(';');
+            for (int i = 0; i < fields.Length; i++)
+            {
+                string f = fields[i].Trim();
+                if (!f.StartsWith("at=", StringComparison.OrdinalIgnoreCase)) continue;
+                string[] xyz = f.Substring(3).Split(',');
+                if (xyz.Length != 3) continue;
+                double x, y, z;
+                if (!double.TryParse(xyz[0], NumberStyles.Float, CultureInfo.InvariantCulture, out x) ||
+                    !double.TryParse(xyz[1], NumberStyles.Float, CultureInfo.InvariantCulture, out y) ||
+                    !double.TryParse(xyz[2], NumberStyles.Float, CultureInfo.InvariantCulture, out z)) continue;
+                fields[i] = " at=" + string.Join(",", new[] { x * scale, y * scale, z * scale }.Select(c => c.ToString("0.###", CultureInfo.InvariantCulture)));
+            }
+            return string.Join(";", fields).Trim();
         }
 
         private static bool UpdateUserText(RhinoDoc doc, RhinoObject obj, JToken attrs, double scale)
