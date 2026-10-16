@@ -6,7 +6,7 @@ Windows | AxisVM X8 (.NET Framework 4.8) | Rhino 8.6 or newer for the Rhino plug
 
 ## 1. Download
 
-Download **nextra-axisvm-toolbox.zip** from the repository's [Releases](https://github.com/Tatsuki0123/AxisVM-plugin/releases/latest) page and extract it. It contains `AddOns\` (the DLLs), `Rhino\` (the Rhino plug-in files), `Install-Addons.ps1`, `tools.json` and `INSTALL.md`.
+Download **nextra-axisvm-toolbox.zip** from the repository's [Releases](https://github.com/nextra-studio/nextra-toolbox-axisvm/releases/latest) page and extract it. It contains `AddOns\` (the DLLs), `Rhino\` (the Rhino plug-in files), `Install-Addons.ps1`, `tools.json` and `INSTALL.md`.
 
 ![Download nextra-axisvm-toolbox.zip from Releases](images/install/download-release.svg)
 
