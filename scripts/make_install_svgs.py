@@ -112,6 +112,22 @@ body += ring(40, 128, 640, 48) + badge(690, 126, 1)
 body += '<rect class="f" x="44" y="180" width="632" height="36" rx="8"/><text class="m" x="60" y="203">Source code (zip)</text><text class="s" x="440" y="203">not needed</text>'
 svg("download-release.svg", 720, 264, body)
 
+# 2b. Double-click installer -----------------------------------------------------------------------------
+body = window(20, 16, 330, 214, "nextra-axisvm-toolbox  (extracted)")
+for i, (nm, hl) in enumerate([("AddOns", False), ("Rhino", False), ("Install-Addons.bat", True), ("Install-Addons.ps1", False), ("tools.json", False), ("INSTALL.md", False)]):
+    y = 70 + i * 26
+    if hl:
+        body += '<rect class="sel" x="34" y="%d" width="300" height="24" rx="4"/>' % (y - 17)
+    body += '<text class="m" x="46" y="%d">%s</text>' % (y, nm)
+body += ring(30, 70 + 2 * 26 - 21, 308, 32) + badge(344, 70 + 2 * 26 - 21, 1)
+body += arrow(356, 123, 392, 123)
+body += '<rect class="term" x="400" y="40" width="300" height="190" rx="10"/>'
+for i, (cls, t) in enumerate([("tt", "Install-Addons.bat"), ("tg", "Installed RhinoImportAddon.dll"), ("tg", "Installed OneWayLoadPanelAddon.dll"), ("tp", "..."), ("tg", "Installed ...Addon.dll"), ("tt", "Restart AxisVM ..."), ("tp", "Press any key to continue")]):
+    body += '<text class="%s" x="414" y="%d">%s</text>' % (cls, 68 + i * 22, esc(t))
+body += badge(692, 46, 2)
+body += '<text class="s" x="360" y="252" text-anchor="middle">1 double-click Install-Addons.bat    2 wait for the list, press any key</text>'
+svg("double-click.svg", 720, 270, body)
+
 # 3. PowerShell script ------------------------------------------------------------------------------------
 lines = ['<tspan class="tp">PS C:\\Users\\you\\Downloads\\nextra-axisvm-toolbox&gt;</tspan> <tspan class="tt">.\\Install-Addons.ps1</tspan>']
 lines += ['<tspan class="tg">Installed %s</tspan>' % t["dll"] for t in tools]

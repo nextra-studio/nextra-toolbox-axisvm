@@ -28,16 +28,29 @@ A tool that is still being developed carries **(WIP)** in its AxisVM menu text a
 
 ### 1. Download
 
-**[Download nextra-axisvm-toolbox.zip](https://github.com/nextra-studio/nextra-toolbox-axisvm/releases/latest/download/nextra-axisvm-toolbox.zip)** and extract it anywhere (for example your Downloads folder). It contains the add-on DLLs, the Rhino plug-in files, `Install-Addons.ps1`, `tools.json` and an offline copy of the install guide.
+**[Download nextra-axisvm-toolbox.zip](https://github.com/nextra-studio/nextra-toolbox-axisvm/releases/latest/download/nextra-axisvm-toolbox.zip)** and extract it anywhere (for example your Downloads folder). It contains the add-on DLLs, the Rhino plug-in files, `Install-Addons.bat`, `Install-Addons.ps1`, `tools.json` and an offline copy of the install guide.
 
 ![On the GitHub Releases page, download nextra-axisvm-toolbox.zip](AxisVM%20plugin/docs/images/install/download-release.svg)
 
 ### 2. AxisVM add-ons
 
-Close every AxisVM window, then choose **one** way.
+Close every AxisVM window, then choose **one** of three ways, easiest first. All three end with the same files in the same folder.
 
 <details open>
-<summary><strong>A. Install script (recommended)</strong>: backup, copy and verify in one step</summary>
+<summary><strong>A. Double-click (easiest)</strong>: no PowerShell needed</summary>
+
+Open the extracted folder, **double-click `Install-Addons.bat`**, and wait for the list of installed DLLs. No PowerShell window or settings change needed.
+
+![Double-click Install-Addons.bat](AxisVM%20plugin/docs/images/install/double-click.svg)
+
+- A blue **Windows protected your PC** box may appear for a downloaded file: click **More info**, then **Run anyway**.
+- If AxisVM is not in `C:\AXISVM X8`, the script asks for your AddOns folder. You can also drag that folder onto `Install-Addons.bat`.
+- If Windows needs administrator rights for the AxisVM folder, the window offers **Try again as administrator**.
+
+</details>
+
+<details open>
+<summary><strong>B. PowerShell</strong>: the same installer, started from a terminal</summary>
 
 Open PowerShell in the extracted folder (Shift + right-click in the folder, then **Open in Terminal**) and run:
 
@@ -56,7 +69,7 @@ If PowerShell refuses to run it, use `powershell -ExecutionPolicy Bypass -File .
 </details>
 
 <details>
-<summary><strong>B. Fallback: copy the files yourself</strong> (no script needed)</summary>
+<summary><strong>C. Fallback: copy the files yourself</strong> (no script at all)</summary>
 
 1. Open the ZIP's `AddOns` folder and your AxisVM `AddOns` folder (normally `C:\AXISVM X8\AddOns`).
 2. Select these DLLs and copy them into the AxisVM folder, replacing older versions:

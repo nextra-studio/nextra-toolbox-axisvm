@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 270" width="720" height="270"><style>
+.bg{fill:#f6f8fa}.win{fill:#fff;stroke:#d0d7de;stroke-width:1.5}.bar{fill:#eaeef2}
+.t{font:600 15px Segoe UI,Helvetica,Arial,sans-serif;fill:#1f2328}
+.s{font:13px Segoe UI,Helvetica,Arial,sans-serif;fill:#57606a}
+.h{font:700 18px Segoe UI,Helvetica,Arial,sans-serif;fill:#1f2328}
+.m{font:13px Consolas,Menlo,monospace;fill:#1f2328}
+.f{fill:#fff;stroke:#d0d7de}.sel{fill:#ddf4ff}.card{fill:#fff;stroke:#d0d7de;stroke-width:1.5}
+.btn{fill:#1f883d}.bt{font:600 13px Segoe UI,Helvetica,Arial,sans-serif;fill:#fff}
+.blue{fill:#0066b4}.orange{fill:#d86712}
+.ring{fill:none;stroke:#d1242f;stroke-width:3;stroke-dasharray:6 4}
+.badge{fill:#d1242f}.bn{font:700 13px Segoe UI,Arial,sans-serif;fill:#fff}
+.arrow{fill:none;stroke:#0066b4;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.term{fill:#0d1117}.tt{font:13px Consolas,Menlo,monospace;fill:#e6edf3}
+.tg{font:13px Consolas,Menlo,monospace;fill:#3fb950}.tp{font:13px Consolas,Menlo,monospace;fill:#8b949e}
+@media (prefers-color-scheme: dark){
+.bg{fill:#0d1117}.win,.card{fill:#161b22;stroke:#3d444d}.bar{fill:#21262d}
+.t,.m,.h{fill:#e6edf3}.s{fill:#9da7b3}.f{fill:#0d1117;stroke:#3d444d}.sel{fill:#1f3a5f}
+.blue{fill:#4da3ff}.arrow{stroke:#4da3ff}}
+</style><rect class="bg" width="720" height="270" rx="12"/><rect class="win" x="20" y="16" width="330" height="214" rx="10"/><path class="bar" d="M21 50V26a9 9 0 0 1 9-9h310a9 9 0 0 1 9 9v24z"/><circle cx="38" cy="33" r="5" fill="#ff5f57"/><circle cx="54" cy="33" r="5" fill="#febc2e"/><circle cx="70" cy="33" r="5" fill="#28c840"/><text class="s" x="185" y="38" text-anchor="middle">nextra-axisvm-toolbox  (extracted)</text><text class="m" x="46" y="70">AddOns</text><text class="m" x="46" y="96">Rhino</text><rect class="sel" x="34" y="105" width="300" height="24" rx="4"/><text class="m" x="46" y="122">Install-Addons.bat</text><text class="m" x="46" y="148">Install-Addons.ps1</text><text class="m" x="46" y="174">tools.json</text><text class="m" x="46" y="200">INSTALL.md</text><rect class="ring" x="30" y="101" width="308" height="32" rx="9"/><circle class="badge" cx="344" cy="101" r="11"/><text class="bn" x="344" y="105" text-anchor="middle">1</text><path class="arrow" d="M356 123L392 123"/><path class="arrow" d="M392 123l-10 -7M392 123l-10 7"/><rect class="term" x="400" y="40" width="300" height="190" rx="10"/><text class="tt" x="414" y="68">Install-Addons.bat</text><text class="tg" x="414" y="90">Installed RhinoImportAddon.dll</text><text class="tg" x="414" y="112">Installed OneWayLoadPanelAddon.dll</text><text class="tp" x="414" y="134">...</text><text class="tg" x="414" y="156">Installed ...Addon.dll</text><text class="tt" x="414" y="178">Restart AxisVM ...</text><text class="tp" x="414" y="200">Press any key to continue</text><circle class="badge" cx="692" cy="46" r="11"/><text class="bn" x="692" y="50" text-anchor="middle">2</text><text class="s" x="360" y="252" text-anchor="middle">1 double-click Install-Addons.bat    2 wait for the list, press any key</text></svg>

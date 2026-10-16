@@ -6,15 +6,25 @@ Windows | AxisVM X8 (.NET Framework 4.8) | Rhino 8.6 or newer for the Rhino plug
 
 ## 1. Download
 
-Download **nextra-axisvm-toolbox.zip** from the repository's [Releases](https://github.com/nextra-studio/nextra-toolbox-axisvm/releases/latest) page and extract it. It contains `AddOns\` (the DLLs), `Rhino\` (the Rhino plug-in files), `Install-Addons.ps1`, `tools.json` and `INSTALL.md`.
+Download **nextra-axisvm-toolbox.zip** from the repository's [Releases](https://github.com/nextra-studio/nextra-toolbox-axisvm/releases/latest) page and extract it. It contains `AddOns\` (the DLLs), `Rhino\` (the Rhino plug-in files), `Install-Addons.bat`, `Install-Addons.ps1`, `tools.json` and `INSTALL.md`.
 
 ![Download nextra-axisvm-toolbox.zip from Releases](images/install/download-release.svg)
 
 ## 2. AxisVM add-ons
 
-Close every AxisVM window first.
+Close every AxisVM window first, then choose one of three ways, easiest first. All end with the same files in the same folder.
 
-### A. Install script (recommended)
+### A. Double-click (easiest)
+
+Open the extracted folder, **double-click `Install-Addons.bat`**, and wait for the list of installed DLLs. No PowerShell window or settings change needed.
+
+![Double-click Install-Addons.bat](images/install/double-click.svg)
+
+- A blue **Windows protected your PC** box may appear for a downloaded file: click **More info**, then **Run anyway**.
+- If AxisVM is not in `C:\AXISVM X8`, the script asks for your AddOns folder. You can also drag that folder onto `Install-Addons.bat`.
+- If Windows needs administrator rights for the AxisVM folder, the window offers **Try again as administrator**.
+
+### B. PowerShell
 
 In the extracted folder open PowerShell and run:
 
@@ -28,7 +38,7 @@ In the extracted folder open PowerShell and run:
 
 It reads the tool list from `tools.json`, verifies that every DLL is present, backs up existing toolbox DLLs to `%LOCALAPPDATA%\NextraToolbox\backups\<timestamp>`, copies the new ones and compares SHA-256 hashes. It does not delete other files or install vendor assemblies. `-WhatIf` previews. If execution policy blocks the script: `powershell -ExecutionPolicy Bypass -File .\Install-Addons.ps1`.
 
-### B. Fallback: copy the DLLs yourself
+### C. Fallback: copy the DLLs yourself
 
 1. Open the ZIP's `AddOns` folder and the AxisVM `AddOns` folder (normally `C:\AXISVM X8\AddOns`) side by side.
 2. Copy these DLLs into the AxisVM folder, replacing older versions (optionally keep the old ones first):

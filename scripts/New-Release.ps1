@@ -1,5 +1,5 @@
 # Builds everything and assembles the downloadable toolbox ZIP: dist\nextra-axisvm-toolbox.zip
-#   AddOns\*.dll   Rhino\*   Install-Addons.ps1   tools.json   INSTALL.md
+#   AddOns\*.dll   Rhino\*   Install-Addons.bat   Install-Addons.ps1   tools.json   INSTALL.md
 # Publish it with:  gh release create v<version> dist\nextra-axisvm-toolbox.zip --title "..." --notes "..."
 # (keep the asset name unchanged: the README links to releases/latest/download/nextra-axisvm-toolbox.zip)
 [CmdletBinding()]
@@ -25,7 +25,7 @@ foreach ($t in $tools.tools) {
 }
 $rb = Join-Path $repo 'Rhino\AxisBridge\bin\Release'
 foreach ($f in $tools.rhino.files) { Copy-Item (Join-Path $rb $f) "$stage\Rhino" }
-Copy-Item (Join-Path $repo 'scripts\Install-Addons.ps1'), (Join-Path $repo 'tools.json') $stage
+Copy-Item (Join-Path $repo 'scripts\Install-Addons.ps1'), (Join-Path $repo 'scripts\Install-Addons.bat'), (Join-Path $repo 'tools.json') $stage
 Copy-Item (Join-Path $repo 'AxisVM plugin\docs\INSTALLATION.md') (Join-Path $stage 'INSTALL.md')
 
 $zip = Join-Path $Dist 'nextra-axisvm-toolbox.zip'

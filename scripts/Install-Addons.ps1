@@ -25,7 +25,15 @@ foreach ($name in $names) {
 if (Get-Process -Name 'AxisVM*' -ErrorAction SilentlyContinue) { throw 'Close AxisVM before replacing its add-ons.' }
 if ($SourceDir.TrimEnd('\') -eq $AddOnsDir.TrimEnd('\')) { throw 'Source and destination must differ.' }
 if (-not $PSCmdlet.ShouldProcess($AddOnsDir, "Install the $($names.Count) Nextra add-on DLLs, backing up existing versions")) { return }
-New-Item -ItemType Directory -Path $AddOnsDir -Force | Out-Null
+if (-not (Test-Path -LiteralPath $AddOnsDir)) {
+    # A missing folder usually means a different AxisVM location; do not silently create one.
+    if ([Environment]::UserInteractive) {
+        $answer = Read-Host "AxisVM AddOns folder not found: $AddOnsDir`nType the correct AddOns folder (or press Enter to cancel)"
+        if (-not $answer) { throw 'Cancelled. Re-run with -AddOnsDir ''<your AxisVM>\AddOns''.' }
+        $AddOnsDir = [System.IO.Path]::GetFullPath($answer.Trim('"'))
+        if (-not (Test-Path -LiteralPath $AddOnsDir)) { throw "Folder not found: $AddOnsDir" }
+    } else { throw "AxisVM AddOns folder not found: $AddOnsDir. Use -AddOnsDir." }
+}
 $backup = Join-Path $BackupRoot (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
 foreach ($name in $names) {
     $destination = Join-Path $AddOnsDir "$name.dll"
@@ -38,6 +46,7 @@ foreach ($name in $names) {
     $source = Join-Path $SourceDir "$name.dll"
     $destination = Join-Path $AddOnsDir "$name.dll"
     Copy-Item -LiteralPath $source -Destination $destination -Force
+    Unblock-File -LiteralPath $destination  # drop the downloaded-from-internet mark so AxisVM loads it
     if ((Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $destination).Hash) {
         throw "Installed hash does not match: $name.dll. Previous versions: $backup"
     }
