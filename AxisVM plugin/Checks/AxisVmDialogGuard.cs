@@ -2,9 +2,10 @@
 // elements deleted", "Save changes?", ...). Each one blocks the COM call that caused it until someone clicks it,
 // which looks like a hang. Only safe answers are ever pressed: OK, No or Cancel - never Yes or Save.
 //
-// Usage: app = AxisVmDialogGuard.Launch() instead of Activator.CreateInstance. Launch REFUSES to start while any AxisVM is
-// already open (a COM start would attach to it and the check would run inside the user's session), and the guard only ever
-// touches the one process Launch created - never an AxisVM the user opens later - and logs each dialog it closed.
+// Usage: app = AxisVmDialogGuard.Launch() instead of Activator.CreateInstance. Launch starts its OWN AxisVM like a double
+// click and connects to exactly that process through the NextraAxisVM add-on ("!NextraAxisVM.Host.<pid>"); it never attaches
+// to an AxisVM that is already open (the user's, or another agent's). The guard only touches that process and the processes
+// it starts itself, and logs each dialog it closed.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -31,8 +32,49 @@ internal static class AxisVmDialogGuard
     /// <summary>Button captions pressed, best first.</summary>
     private static readonly string[] Safe = { "No", "OK", "Cancel" };
 
-    /// <summary>The single AxisVM process this check created (0 until it is known). The guard acts on nothing else.</summary>
-    private static int ownedPid;
+    /// <summary>
+    /// The AxisVM process this check started, plus any process it starts itself (AxisVM restarts itself in a child process
+    /// when its first license key is busy). The guard acts on nothing else - other AxisVMs on this machine (the user's,
+    /// another agent's) are never touched, whenever they were started.
+    /// </summary>
+    private static readonly HashSet<int> owned = new HashSet<int>();
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct PROCESSENTRY32
+    {
+        public uint dwSize; public uint cntUsage; public uint th32ProcessID; public IntPtr th32DefaultHeapID; public uint th32ModuleID;
+        public uint cntThreads; public uint th32ParentProcessID; public int pcPriClassBase; public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool Process32First(IntPtr snap, ref PROCESSENTRY32 e);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool Process32Next(IntPtr snap, ref PROCESSENTRY32 e);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr h);
+
+    /// <summary>Adds every running process whose parent is already owned (children of our AxisVM).</summary>
+    private static void AdoptChildren()
+    {
+        IntPtr snap = CreateToolhelp32Snapshot(2, 0);
+        if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return;
+        try
+        {
+            List<KeyValuePair<int, int>> pairs = new List<KeyValuePair<int, int>>();
+            PROCESSENTRY32 e = new PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32)) };
+            if (Process32First(snap, ref e))
+                do pairs.Add(new KeyValuePair<int, int>((int)e.th32ProcessID, (int)e.th32ParentProcessID)); while (Process32Next(snap, ref e));
+            lock (owned)
+            {
+                bool grew = true;
+                while (grew)
+                {
+                    grew = false;
+                    foreach (KeyValuePair<int, int> kv in pairs)
+                        if (owned.Contains(kv.Value) && owned.Add(kv.Key)) grew = true;
+                }
+            }
+        }
+        finally { CloseHandle(snap); }
+    }
 
     private static List<int> AxisVmPids()
     {
@@ -44,26 +86,87 @@ internal static class AxisVmDialogGuard
         return pids;
     }
 
-    /// <summary>Starts a new AxisVM through COM, or throws when one is already open. See the file header.</summary>
+    [DllImport("ole32.dll")] private static extern int GetRunningObjectTable(int reserved, out System.Runtime.InteropServices.ComTypes.IRunningObjectTable rot);
+    [DllImport("ole32.dll")] private static extern int CreateBindCtx(int reserved, out System.Runtime.InteropServices.ComTypes.IBindCtx ctx);
+
+    /// <summary>
+    /// Starts AxisVM the way a double click does - so it opens with the user's last license key (a COM start tries the first
+    /// key in the list, which may be in use, and then restarts itself in a second process the COM proxy cannot follow) -
+    /// and connects through the NextraAxisVM add-on's "!NextraAxisVM.Host.&lt;pid&gt;" entry in the running object table.
+    /// Throws when an AxisVM is already open. See the file header.
+    /// </summary>
     public static AxisVM.IAxisVMApplication Launch()
     {
-        List<int> open = AxisVmPids();
-        if (open.Count > 0)
-            throw new InvalidOperationException("AxisVM is already open (process " + open[0] + "). Close it first: a check never shares or touches an AxisVM that is already running.");
+        string dir = Environment.GetEnvironmentVariable("AXISVM_DIR");
+        if (string.IsNullOrEmpty(dir)) dir = @"C:\AXISVM X8";
+        string exe = System.IO.Path.Combine(dir, "AxisVM_x64.exe");
 
         new Thread(Watch) { IsBackground = true, Name = "AxisVM dialog guard" }.Start();
-        AxisVM.IAxisVMApplication app = (AxisVM.IAxisVMApplication)Activator.CreateInstance(Type.GetTypeFromProgID("AxisVM.AxisVMApplication"));
+        Process started = Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = dir, UseShellExecute = true });
+        lock (owned) owned.Add(started.Id);
 
-        // The process this created: the one AxisVM that exists now.
-        for (int i = 0; i < 100 && ownedPid == 0; i++)
+        DateTime end = DateTime.Now.AddSeconds(180);
+        while (DateTime.Now < end)
         {
-            List<int> now = AxisVmPids();
-            if (now.Count == 1) ownedPid = now[0];
-            else if (now.Count > 1) throw new InvalidOperationException("More than one AxisVM started - cannot tell which one belongs to this check.");
-            else Thread.Sleep(100);
+            List<int> pids;
+            lock (owned) pids = new List<int>(owned);
+            foreach (int pid in pids)
+            {
+                object host = FromRot("!NextraAxisVM.Host." + pid);
+                if (host == null) continue;
+                try
+                {
+                    AxisVM.IAxisVMApplication app = (AxisVM.IAxisVMApplication)host.GetType().InvokeMember(
+                        "GetApplication", System.Reflection.BindingFlags.InvokeMethod, null, host, null);
+                    if (app != null && app.Loaded == AxisVM.ELongBoolean.lbTrue) return app;
+                }
+                catch { }
+            }
+            Thread.Sleep(500);
         }
-        if (ownedPid == 0) throw new InvalidOperationException("The AxisVM this check started could not be found.");
-        return app;
+        throw new InvalidOperationException("AxisVM did not finish starting, or the NextraAxisVM add-on is not loaded (no '!NextraAxisVM.Host.<pid>' in the running object table).");
+    }
+
+    /// <summary>Waits (up to <paramref name="seconds"/>) until the AxisVM processes this check started have exited.</summary>
+    public static void WaitClosed(int seconds)
+    {
+        DateTime end = DateTime.Now.AddSeconds(seconds);
+        while (DateTime.Now < end)
+        {
+            bool alive = false;
+            List<int> pids;
+            lock (owned) pids = new List<int>(owned);
+            foreach (int pid in pids)
+            {
+                try { if (!Process.GetProcessById(pid).HasExited) alive = true; } catch { }
+            }
+            if (!alive) return;
+            Thread.Sleep(500);
+        }
+    }
+
+    private static object FromRot(string name)
+    {
+        try
+        {
+            System.Runtime.InteropServices.ComTypes.IRunningObjectTable rot;
+            System.Runtime.InteropServices.ComTypes.IBindCtx ctx;
+            if (GetRunningObjectTable(0, out rot) != 0 || CreateBindCtx(0, out ctx) != 0) return null;
+            System.Runtime.InteropServices.ComTypes.IEnumMoniker monikers;
+            rot.EnumRunning(out monikers);
+            System.Runtime.InteropServices.ComTypes.IMoniker[] one = new System.Runtime.InteropServices.ComTypes.IMoniker[1];
+            while (monikers.Next(1, one, IntPtr.Zero) == 0)
+            {
+                string display;
+                one[0].GetDisplayName(ctx, null, out display);
+                if (!string.Equals(display, name, StringComparison.OrdinalIgnoreCase)) continue;
+                object found;
+                rot.GetObject(one[0], out found);
+                return found;
+            }
+        }
+        catch { }
+        return null;
     }
 
     /// <summary>
@@ -94,12 +197,11 @@ internal static class AxisVmDialogGuard
         {
             try
             {
-                int pid = ownedPid;
-                if (pid != 0)
-                {
-                    HashSet<int> pids = new HashSet<int> { pid };
-                    EnumWindows((h, l) => { Inspect(h, pids); return true; }, IntPtr.Zero);
-                }
+                AdoptChildren();
+
+                HashSet<int> pids;
+                lock (owned) pids = new HashSet<int>(owned);
+                if (pids.Count > 0) EnumWindows((h, l) => { Inspect(h, pids); return true; }, IntPtr.Zero);
             }
             catch { }
             Thread.Sleep(400);

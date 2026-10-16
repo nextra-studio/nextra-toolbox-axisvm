@@ -44,6 +44,7 @@ internal static class RhinoUpdateLiveChecks
     {
         new System.Threading.Thread(() => { System.Threading.Thread.Sleep(60000); Console.WriteLine("(AxisVM did not close within a minute; it was left to exit on its own.)"); Environment.Exit(failures == 0 ? 0 : 1); }) { IsBackground = true }.Start();
         try { app.AskCloseOnLastReleased = ELongBoolean.lbFalse; app.Quit(); } catch { }
+        AxisVmDialogGuard.WaitClosed(50);
     }
 
     private static int C(Func<int> f) { try { return f(); } catch { return -1; } }
@@ -407,7 +408,10 @@ internal static class RhinoUpdateLiveChecks
                         .Add(JsonValue.Obj().Set("case", JsonValue.Str("RhinoOnlyCase")).Set("factor", JsonValue.Num(0.7)))));
                 root[LinkFile.RhinoSection].Set("sent", JsonValue.Str("2026-01-03T00:00:00.000Z"));
             });
-            LoadFromRhino(linkPath, lengthToM, new List<string>());
+            var comboNotes = new List<string>();
+            LoadFromRhino(linkPath, lengthToM, comboNotes);
+            foreach (string n in comboNotes) if (n.IndexOf("ombination", StringComparison.OrdinalIgnoreCase) >= 0 || n.IndexOf("RhinoOnlyCase", StringComparison.Ordinal) >= 0) Console.WriteLine("      note: " + n);
+            Console.WriteLine("      combinations in AxisVM: " + model.LoadCombinations.Count);
             JsonValue after = Section(linkPath);
             JsonValue made = LibEntry(Section(linkPath)["library"] ?? JsonValue.Obj(), "combinations", "RhinoSLS");
             RhinoLinkSender.Send(model, linkPath);

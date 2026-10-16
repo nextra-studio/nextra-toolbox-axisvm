@@ -1,7 +1,7 @@
 # Checks re-importing a Rhino export as an update (AxisVM plugin\Checks\RhinoUpdateLiveChecks.cs): import, the same
 # export again as an update, then with a beam moved and a curve deleted - all in a fresh AxisVM started here through
 # COM and closed again; then the live link round trip (Send to Rhino / Load from Rhino) in another fresh AxisVM.
-# An AxisVM that is already open is never touched.
+# Each run starts its own AxisVM and never touches one that is already open (the user's or another agent's).
 # Usage: scripts\Check-RhinoUpdate.ps1 <AxExport.json> [-Meters]
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$Json, [switch]$Meters)

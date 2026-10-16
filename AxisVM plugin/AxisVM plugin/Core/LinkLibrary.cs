@@ -169,8 +169,7 @@ namespace AxisVM_plugin.Core
             if (name.Length == 0) return null;
 
             string type = "Other";
-            try { type = model.LoadCombinations.get_CombinationType(index).ToString(); } catch { }
-            if (type.StartsWith("ct", StringComparison.Ordinal)) type = type.Substring(2);
+            try { type = TypeName(model.LoadCombinations.get_CombinationType(index)); } catch { }
 
             JsonValue terms = JsonValue.Arr();
             try
@@ -191,6 +190,26 @@ namespace AxisVM_plugin.Core
             }
             catch { }
             return JsonValue.Obj().Set("name", JsonValue.Str(name)).Set("type", JsonValue.Str(type)).Set("terms", terms);
+        }
+
+        /// <summary>
+        /// The Eurocode name of a combination type. ECombinationType has aliases with the same value (ctSLS1 = ctSLSChar,
+        /// ctULS1 = ctULS, ...), and ToString() picks either, so the names are fixed here.
+        /// </summary>
+        private static string TypeName(ECombinationType t)
+        {
+            switch ((int)t)
+            {
+                case 0: return "Other";
+                case 1: return "SLSChar";
+                case 2: return "SLSFreq";
+                case 3: return "SLSQuasi";
+                case 4: return "ULS";
+                case 5: return "ULSSeismic";
+                case 6: return "ULSExceptional";
+            }
+            string name = t.ToString();
+            return name.StartsWith("ct", StringComparison.Ordinal) ? name.Substring(2) : name;
         }
 
         private static int Count(Func<int> f)
