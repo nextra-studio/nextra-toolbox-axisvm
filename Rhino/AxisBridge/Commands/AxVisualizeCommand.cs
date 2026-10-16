@@ -1,3 +1,4 @@
+using AxisBridge.UI;
 using AxisBridge.Visualize;
 using Rhino;
 using Rhino.Commands;
@@ -5,8 +6,8 @@ using Rhino.Commands;
 namespace AxisBridge.Commands
 {
     /// <summary>
-    /// Toggles the AxVisualize overlay: builds text-dot tags for every Ax_* attribute on their own
-    /// "AxTag" child layers, or removes them if already on. The tags are excluded from AxExport.
+    /// Toggles the AxVisualize window and its display-only overlay (supports, releases, load arrows of
+    /// one load case, element info). Nothing is added to the document, so nothing is exported.
     /// </summary>
     public class AxVisualizeCommand : Command
     {
@@ -16,22 +17,16 @@ namespace AxisBridge.Commands
         {
             if (doc == null) return Result.Failure;
 
+            // Files saved with the old text-dot tags: remove them, the overlay replaces them.
             if (TagBuilder.IsOn(doc))
             {
                 int removed = TagBuilder.Clear(doc);
-                RhinoApp.WriteLine($"AxVisualize OFF: removed {removed} tag(s) and the AxTag layers.");
-                return Result.Success;
+                RhinoApp.WriteLine($"AxVisualize: removed {removed} old text-dot tag(s) and the AxTag layers.");
             }
 
-            int dots = TagBuilder.Build(doc, out int categories);
-            if (dots == 0)
-            {
-                TagBuilder.Clear(doc);
-                RhinoApp.WriteLine("AxVisualize: no Ax_* attributes found to tag.");
-                return Result.Nothing;
-            }
-
-            RhinoApp.WriteLine($"AxVisualize ON: {dots} tag(s) across {categories} categor(ies). Toggle child layers to filter.");
+            bool wasOpen = VisualizeForm.Current != null;
+            VisualizeForm.Toggle();
+            RhinoApp.WriteLine(wasOpen ? "AxVisualize OFF." : "AxVisualize ON: pick what to show in the AxVisualize window.");
             return Result.Success;
         }
     }

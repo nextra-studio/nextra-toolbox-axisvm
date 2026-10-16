@@ -65,9 +65,14 @@
     <Compile Include="Core\AxisModelBuilder.Surfaces.cs" />
     <Compile Include="Core\AxisModelBuilder.Loads.cs" />
     <Compile Include="Core\AxisModelBuilder.Helpers.cs" />
+    <Compile Include="Core\AxisModelBuilder.Link.cs" />
+    <Compile Include="Core\LinkFile.cs" />
+    <Compile Include="Core\LinkState.cs" />
+    <Compile Include="Core\RhinoLinkSender.cs" />
     <Compile Include="Core\SpringParamResolver.cs" />
     <Compile Include="Core\AttributeParser.cs" />
     <Compile Include="Core\CatalogResolver.cs" />
+    <Compile Include="Core\CatalogExport.cs" />
     <Compile Include="Core\Json.cs" />
     <Compile Include="Core\RhinoModelDto.cs" />
     <Compile Include="Core\AxisVMHelper.cs" />

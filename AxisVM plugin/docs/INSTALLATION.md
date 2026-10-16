@@ -82,7 +82,7 @@ Keep `AxisBridge.rhp` and `Newtonsoft.Json.dll` (the ZIP's `Rhino` folder) toget
 
 ![Install AxisBridge.rhp manually](images/install/rhino-manual.svg)
 
-Type `Ax` in the command line to see `AxPoint`, `AxLine`, `AxDomain`, `AxLibrary`, `AxEdgeHinge`, `AxVisualize`, `AxClear`, `AxUpdateGuid`, `AxLayerTidyUp` and `AxExport`. How to use them: [Rhino commands guide](user-guide/rhino-commands.md).
+Type `Ax` in the command line to see `AxPoint`, `AxLine`, `AxDomain`, `AxLibrary`, `AxVisualize`, `AxClear`, `AxUpdateGuid`, `AxLayerTidyUp` and `AxExport`. How to use them: [Rhino commands guide](user-guide/rhino-commands.md).
 
 ## Update and roll back
 

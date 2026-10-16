@@ -40,6 +40,17 @@ namespace AxisBridge.Library
         /// <summary>Wall thickness (Pipe, RectHollow) [mm].</summary>
         [JsonProperty("t")] public double T { get; set; }
 
+        /// <summary>
+        /// Set when the profile was picked from the AxisVM catalog (AxLibrary > From AxisVM catalog): the table's shape
+        /// (ECrossSectionShapeEx), its name and its catalog file, so AxisVM adds exactly this profile even
+        /// when another table has one with the same name. Blank / 0 for typed names.
+        /// </summary>
+        [JsonProperty("catalogShape", DefaultValueHandling = DefaultValueHandling.Ignore)] public int CatalogShape { get; set; }
+        [JsonProperty("catalogTable", NullValueHandling = NullValueHandling.Ignore)] public string CatalogTable { get; set; }
+        [JsonProperty("catalogFile", NullValueHandling = NullValueHandling.Ignore)] public string CatalogFile { get; set; }
+        /// <summary>The name exactly as the catalog spells it, only when that differs from Name (some tables pad names with spaces).</summary>
+        [JsonProperty("catalogName", NullValueHandling = NullValueHandling.Ignore)] public string CatalogName { get; set; }
+
         /// <summary>A readable definition for the grid / tooltips.</summary>
         public string Describe()
         {
@@ -49,7 +60,7 @@ namespace AxisBridge.Library
                 case Circle: return string.Format(CultureInfo.InvariantCulture, "Circle d={0} mm", H);
                 case Pipe: return string.Format(CultureInfo.InvariantCulture, "Pipe d={0} t={1} mm", H, T);
                 case RectHollow: return string.Format(CultureInfo.InvariantCulture, "Hollow rect b={0} h={1} t={2} mm", B, H, T);
-                default: return "AxisVM catalog profile";
+                default: return string.IsNullOrEmpty(CatalogTable) ? "AxisVM catalog profile" : "AxisVM catalog: " + CatalogTable;
             }
         }
 

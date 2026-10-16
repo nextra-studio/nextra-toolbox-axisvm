@@ -7,17 +7,17 @@ using Rhino.Geometry;
 
 namespace AxisBridge.Commands
 {
-    /// <summary>Assigns surface attributes (domain or load panel, loads) to surfaces, polysurfaces or closed curves.</summary>
+    /// <summary>Assigns surface attributes (domain or load panel, loads) to surfaces, polysurfaces, meshes or closed curves.</summary>
     public class AxDomainCommand : Command
     {
         public override string EnglishName => "AxDomain";
 
         protected override Result RunCommand(RhinoDoc doc, RunMode mode)
         {
-            // Meshes are not offered: AxisVM domains are built from boundary lines, which a mesh does not have.
+            // A mesh is exported by its outline: each flat region becomes one domain, which AxisVM meshes itself.
             return AttrCommandRunner.Run(doc,
-                "Select planar surfaces, polysurfaces or closed planar curves for domain / load panel attributes",
-                ObjectType.Surface | ObjectType.Brep | ObjectType.Extrusion | ObjectType.Curve,
+                "Select planar surfaces, polysurfaces, meshes or closed planar curves for domain / load panel attributes",
+                ObjectType.Surface | ObjectType.Brep | ObjectType.Extrusion | ObjectType.Mesh | ObjectType.Curve,
                 (obj, geom, ci) => !(geom is Curve c) || c.IsClosed,
                 AxGeomKind.Domain,
                 DomainAttrForm.ScalarKeys, DomainAttrForm.FamilyKeys,

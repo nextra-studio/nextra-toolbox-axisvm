@@ -32,7 +32,20 @@ namespace AxisBridge.Export
         /// <param name="includeUntagged">Also export objects without Ax_* attributes (as plain nodes / lines / shells).</param>
         public static ExportResult Export(RhinoDoc doc, string filePath, bool selectedOnly, bool includeUntagged)
         {
-            ExportResult res = new ExportResult { FilePath = filePath };
+            ExportResult res;
+            ExportModelDto model = Build(doc, selectedOnly, includeUntagged, out res);
+            res.FilePath = filePath;
+
+            string json = JsonConvert.SerializeObject(model, Formatting.Indented);
+            File.WriteAllText(filePath, json, Encoding.UTF8);
+
+            return res;
+        }
+
+        /// <summary>The export model without writing it (AxLink puts it into the link file's "rhino" section).</summary>
+        public static ExportModelDto Build(RhinoDoc doc, bool selectedOnly, bool includeUntagged, out ExportResult res)
+        {
+            res = new ExportResult();
 
             ExportModelDto model = new ExportModelDto
             {
@@ -64,7 +77,7 @@ namespace AxisBridge.Export
                 var attrs = AttrReader.GetAxAttributes(obj);
                 if (!includeUntagged && !AxClassify.IsTagged(attrs))
                 {
-                    if (obj.Geometry is Point || obj.Geometry is Curve || obj.Geometry is Brep || obj.Geometry is Surface || obj.Geometry is Extrusion)
+                    if (obj.Geometry is Point || obj.Geometry is Curve || obj.Geometry is Brep || obj.Geometry is Surface || obj.Geometry is Extrusion || obj.Geometry is Mesh)
                         res.SkippedUntagged++;
                     continue;
                 }
@@ -92,11 +105,7 @@ namespace AxisBridge.Export
             }
 
             model.Warnings = res.Warnings;
-
-            string json = JsonConvert.SerializeObject(model, Formatting.Indented);
-            File.WriteAllText(filePath, json, Encoding.UTF8);
-
-            return res;
+            return model;
         }
 
         private static void CollectTargets(Dictionary<string, string> attrs, List<Guid> into)
@@ -117,12 +126,6 @@ namespace AxisBridge.Export
                 string guid = obj.Id.ToString();
                 attrs[AxKeys.Guid] = guid;
                 string label = ObjLabel(obj);
-
-                if (obj.Geometry is Mesh)
-                {
-                    res.Warnings.Add(label + ": meshes are not supported - convert it to a planar surface. Skipped.");
-                    return;
-                }
 
                 switch (AxClassify.KindOf(obj, attrs))
                 {
@@ -181,9 +184,12 @@ namespace AxisBridge.Export
         private static void ExportDomain(RhinoObject obj, string guid, Dictionary<string, string> attrs, double tol,
                                          string label, ExportModelDto model, ExportResult res)
         {
+            // A mesh is converted once here so the face count and the faces come from the same polysurface.
+            GeometryBase geom = obj.Geometry is Mesh mesh ? GeometryFlattener.MeshToBrep(mesh, tol) : obj.Geometry;
+
             List<FlattenedFace> faces;
             List<string> warnings;
-            if (!GeometryFlattener.TryFlattenDomain(obj.Geometry, tol, out faces, out warnings))
+            if (geom == null || !GeometryFlattener.TryFlattenDomain(geom, tol, out faces, out warnings))
             {
                 res.Warnings.Add(label + ": no planar boundary could be extracted. Skipped.");
                 return;
@@ -196,8 +202,8 @@ namespace AxisBridge.Export
                 for (int i = 0; i < pointLoads.Count; i++) owner[i] = NearestFace(faces, pointLoads[i]);
 
             // Suffix decided from the ORIGINAL object (not from how many faces survived), the same rule
-            // the AxEdgeHinge face picker uses - so a picked "<id>_f2" always matches.
-            bool multiFace = OriginalFaceCount(obj.Geometry) > 1;
+            // the AxLine hinge-domain picker uses - so a picked "<id>_f2" always matches.
+            bool multiFace = OriginalFaceCount(geom) > 1;
 
             for (int fi = 0; fi < faces.Count; fi++)
             {

@@ -203,6 +203,15 @@ namespace AxisVM_plugin.Core
         public string Shape = "Catalog";
         /// <summary>Dimensions in millimetres: B width, H height/diameter, T wall thickness.</summary>
         public double B, H, T;
+        /// <summary>
+        /// Set for profiles picked from the AxisVM catalog in Rhino (AxLoadLib): the table's
+        /// ECrossSectionShapeEx value, its name and its catalog file ("HEA_PL", no folder or extension).
+        /// </summary>
+        public int CatalogShape;
+        public string CatalogTable = "";
+        public string CatalogFile = "";
+        /// <summary>The catalog's own spelling when it differs from Name (a few tables pad names with spaces).</summary>
+        public string CatalogName = "";
     }
 
     public class RhinoLibrary
@@ -254,6 +263,9 @@ namespace AxisVM_plugin.Core
         {
             if (root == null || root.Type != JsonValue.JsonType.Object)
                 throw new FormatException("The file's top level is not a JSON object - this is not an AxisBridge export.");
+
+            // A live link file (AxLink) carries the Rhino model in its "rhino" section.
+            root = LinkFile.RhinoPart(root);
 
             RhinoModel m = new RhinoModel();
 
@@ -438,7 +450,11 @@ namespace AxisVM_plugin.Core
                         Shape = Get(s, "shape", "Catalog"),
                         B = s["b"] != null ? s["b"].AsDouble(0) : 0,
                         H = s["h"] != null ? s["h"].AsDouble(0) : 0,
-                        T = s["t"] != null ? s["t"].AsDouble(0) : 0
+                        T = s["t"] != null ? s["t"].AsDouble(0) : 0,
+                        CatalogShape = s["catalogShape"] != null ? s["catalogShape"].AsInt(0) : 0,
+                        CatalogTable = Get(s, "catalogTable", "").Trim(),
+                        CatalogFile = Get(s, "catalogFile", "").Trim(),
+                        CatalogName = Get(s, "catalogName", "")   // not trimmed: the padding is part of the catalog name
                     };
                     if (sec.Name.Length > 0) m.Library.Sections.Add(sec);
                 }

@@ -38,6 +38,11 @@ internal static class RhinoUiPreview
         Family(line, AxKeys.DistLoad, "LC=Dead; sys=Global; from=ratio:0; to=ratio:1; q1=0,0,-6,0,0,0; q2=0,0,-6,0,0,0");
         Render(new LineAttrForm(line, lib, null), "AxLine", true);
 
+        SelectionState hinge = State(4);
+        hinge.Scalars[AxKeys.Type] = FieldState.Of("EdgeHinge");
+        hinge.Scalars[AxKeys.Stiffness] = FieldState.Of("1e10,1e10,1e10,0,1e10,1e10");
+        Render(new LineAttrForm(hinge, lib, null), "AxLine-hinge", true);
+
         SelectionState domain = State(1);
         domain.Scalars[AxKeys.FeType] = FieldState.Of("Plate");
         domain.Scalars[AxKeys.Material] = FieldState.Of("C30/37");
@@ -45,7 +50,6 @@ internal static class RhinoUiPreview
         Family(domain, AxKeys.DistLoad, "LC=Dead; sys=Global; q=0,0,-5");
         Render(new DomainAttrForm(domain, lib, null), "AxDomain", true);
 
-        Render(new EdgeHingeForm(4, "1 domain, 4 edges"), "AxEdgeHinge", false);
         Render(new LibraryForm(lib, 0), "AxLibrary", false);
         Console.WriteLine("Rendered AxisBridge dialogs to " + output);
         return 0;

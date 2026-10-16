@@ -13,7 +13,7 @@ if (-not $SourceDir) {
 }
 # The tool list comes from tools.json (next to this script in the release ZIP, one folder up in the repo),
 # so a newly registered tool is installed without editing this script.
-$registry = @((Join-Path $PSScriptRoot 'tools.json'), (Join-Path $PSScriptRoot '..	ools.json')) |
+$registry = @((Join-Path $PSScriptRoot 'tools.json'), (Join-Path $PSScriptRoot '..\tools.json')) |
     Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $registry) { throw 'tools.json not found next to Install-Addons.ps1.' }
 $names = @((Get-Content -LiteralPath $registry -Raw | ConvertFrom-Json).tools | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_.dll) })

@@ -218,7 +218,10 @@ namespace AxisVM_plugin.Core
             if (!TryGetLineAttrV161(s.Id, out a)) return;
 
             a.LocalXOrientation = curveStartIsLower ? EMemberLocXOrientation.mlxo_ij : EMemberLocXOrientation.mlxo_ji;
-            if (p.HasEcc && role != LineRole.Truss)
+            RLineAttr_V161 withoutEcc = a;   // value copy: the orientation alone, as a fallback
+            withoutEcc.Beam7DOF = ELongBoolean.lbFalse;
+            bool wantsEcc = p.HasEcc && role != LineRole.Truss;
+            if (wantsEcc)
             {
                 // A curve split into pieces gets its offset interpolated along its length, so a
                 // tapering eccentricity stays continuous. Start/End fields = lower / higher index node.
@@ -235,7 +238,14 @@ namespace AxisVM_plugin.Core
                 // Only cache what AxisVM accepted - load placement relies on it.
                 localXStartNode[s.Id] = s.CurveStartNode;
             }
-            else notes.Add(job.Context + (p.HasEcc ? ": its eccentricity / orientation could not be set." : ": its local x orientation could not be set."));
+            else if (wantsEcc && TrySetLineAttrV161(s.Id, withoutEcc))
+            {
+                // AxisVM refuses a custom offset on some members (a rib takes its offset from the domain it
+                // lies on); the orientation still matters for local loads, so it is kept.
+                localXStartNode[s.Id] = s.CurveStartNode;
+                notes.Add(job.Context + ": AxisVM did not accept its eccentricity (a rib on a domain edge takes its offset from the domain); the local x orientation was set.");
+            }
+            else notes.Add(job.Context + (wantsEcc ? ": its eccentricity / orientation could not be set." : ": its local x orientation could not be set."));
         }
 
         private static RhinoXyz LerpXyz(RhinoXyz a, RhinoXyz b, double t)
@@ -463,10 +473,18 @@ namespace AxisVM_plugin.Core
                 {
                     try
                     {
+                        // AxisVM only accepts an edge support when it is told which domain the edge belongs to
+                        // (code -103 otherwise), so a line support must lie on a slab / wall / plate edge.
+                        int domainId = DomainOwningEdge(s.Id);
+                        if (domainId <= 0)
+                        {
+                            notes.Add(job.Context + ": a line support must lie on the edge of a domain (slab, wall, plate); this line is not on one. Ignored.");
+                            break;
+                        }
                         RStiffnesses stiff = ToStiffnesses(k);
                         RNonLinearity nonlin = new RNonLinearity();
                         RResistances resist = new RResistances();
-                        int id = model.LineSupports.AddEdgeGlobal(ref stiff, ref nonlin, ref resist, s.Id, 0, 0, 0, 0);
+                        int id = model.LineSupports.AddEdgeGlobal(ref stiff, ref nonlin, ref resist, s.Id, 0, 0, domainId, 0);
                         if (id > 0) stats.LineSupportsCreated++;
                         else { notes.Add(string.Format("{0}: AxisVM rejected the line support (code {1}).", job.Context, id)); break; }
                     }
@@ -477,6 +495,18 @@ namespace AxisVM_plugin.Core
                     }
                 }
             }
+        }
+
+        /// <summary>The domain (not a load panel) that has this line on its outer boundary or around a hole, or 0.</summary>
+        private int DomainOwningEdge(int lineId)
+        {
+            foreach (SurfaceJob s in surfaceJobs)
+            {
+                if (IsPanel(s.Role) || s.DomainId <= 0) continue;
+                foreach (int id in s.OuterChain.Ids()) if (id == lineId) return s.DomainId;
+                foreach (Chain h in s.HoleChains) foreach (int id in h.Ids()) if (id == lineId) return s.DomainId;
+            }
+            return 0;
         }
 
         // ==================================================================

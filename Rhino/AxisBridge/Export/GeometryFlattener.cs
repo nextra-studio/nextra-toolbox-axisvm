@@ -104,6 +104,11 @@ namespace AxisBridge.Export
 
             if (geom is Extrusion ext) geom = ext.ToBrep();
             else if (geom is Surface srf) geom = srf.ToBrep();
+            else if (geom is Mesh mesh)
+            {
+                geom = MeshToBrep(mesh, tolerance);
+                if (geom == null) { warnings.Add("the mesh could not be converted to planar faces"); return false; }
+            }
 
             if (geom is Brep brep)
             {
@@ -138,6 +143,20 @@ namespace AxisBridge.Export
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// A mesh as a polysurface with one face per flat region (coplanar mesh faces merged), so its
+        /// outline and openings become domain contours. AxisVM re-meshes the domains itself.
+        /// Deterministic, so face indices ("_f2") stay stable between export and the AxLine hinge-domain picker.
+        /// </summary>
+        public static Brep MeshToBrep(Mesh mesh, double tolerance)
+        {
+            if (mesh == null) return null;
+            Brep brep = Brep.CreateFromMesh(mesh, true);
+            if (brep == null) return null;
+            brep.MergeCoplanarFaces(tolerance, Math.PI / 180.0);
+            return brep;
         }
 
         /// <summary>A closed curve as distinct vertices (no repeated closing vertex).</summary>

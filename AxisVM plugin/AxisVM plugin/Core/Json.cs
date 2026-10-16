@@ -12,7 +12,8 @@ namespace AxisVM_plugin.Core
     /// Newtonsoft.Json would mean a second file to copy and a version that could clash with whatever
     /// AxisVM itself has already loaded into the process, so the ~200 lines below buy back a
     /// single-file deployment. It parses the whole document into a JsonValue tree; RhinoModelDto then
-    /// walks that tree. It is a reader only - nothing here writes JSON.
+    /// walks that tree. The writer at the end exists for the live link file (LinkFile.cs), which the
+    /// addon rewrites while keeping the Rhino section exactly as Rhino wrote it.
     /// </summary>
     public class JsonValue
     {
@@ -80,6 +81,114 @@ namespace AxisVM_plugin.Core
         {
             double d = AsDouble(double.NaN);
             return double.IsNaN(d) ? fallback : (int)Math.Round(d);
+        }
+
+        // ==================================================================
+        // Building and writing
+        // ==================================================================
+
+        public static JsonValue Obj() { return new JsonValue { Type = JsonType.Object, ObjectValue = new Dictionary<string, JsonValue>(StringComparer.Ordinal) }; }
+        public static JsonValue Arr() { return new JsonValue { Type = JsonType.Array, ArrayValue = new List<JsonValue>() }; }
+        public static JsonValue Str(string s) { return s == null ? new JsonValue() : new JsonValue { Type = JsonType.String, StringValue = s }; }
+        public static JsonValue Num(double d) { return new JsonValue { Type = JsonType.Number, NumberValue = d }; }
+        public static JsonValue Bool(bool b) { return new JsonValue { Type = JsonType.Bool, BoolValue = b }; }
+
+        public static JsonValue Xyz(double x, double y, double z)
+        {
+            JsonValue a = Arr();
+            a.Add(Num(x)).Add(Num(y)).Add(Num(z));
+            return a;
+        }
+
+        /// <summary>Sets a member of an object (returns this, for chaining).</summary>
+        public JsonValue Set(string key, JsonValue value)
+        {
+            if (Type != JsonType.Object) throw new InvalidOperationException("Set on a JSON value that is not an object.");
+            ObjectValue[key] = value ?? new JsonValue();
+            return this;
+        }
+
+        /// <summary>Appends to an array (returns this, for chaining).</summary>
+        public JsonValue Add(JsonValue value)
+        {
+            if (Type != JsonType.Array) throw new InvalidOperationException("Add on a JSON value that is not an array.");
+            ArrayValue.Add(value ?? new JsonValue());
+            return this;
+        }
+
+        public string ToJson()
+        {
+            StringBuilder sb = new StringBuilder();
+            Write(sb, 0);
+            return sb.ToString();
+        }
+
+        private void Write(StringBuilder sb, int indent)
+        {
+            switch (Type)
+            {
+                case JsonType.Null: sb.Append("null"); break;
+                case JsonType.Bool: sb.Append(BoolValue ? "true" : "false"); break;
+                case JsonType.Number:
+                    sb.Append(double.IsNaN(NumberValue) || double.IsInfinity(NumberValue) ? "0" : NumberValue.ToString("R", CultureInfo.InvariantCulture));
+                    break;
+                case JsonType.String: WriteString(sb, StringValue ?? ""); break;
+                case JsonType.Array:
+                    // Short arrays of numbers (coordinates) stay on one line.
+                    bool flat = ArrayValue.Count <= 4 && ArrayValue.TrueForAll(v => v.Type == JsonType.Number);
+                    sb.Append('[');
+                    for (int i = 0; i < ArrayValue.Count; i++)
+                    {
+                        if (i > 0) sb.Append(flat ? ", " : ",");
+                        if (!flat) NewLine(sb, indent + 1);
+                        ArrayValue[i].Write(sb, indent + 1);
+                    }
+                    if (!flat && ArrayValue.Count > 0) NewLine(sb, indent);
+                    sb.Append(']');
+                    break;
+                case JsonType.Object:
+                    sb.Append('{');
+                    bool first = true;
+                    foreach (KeyValuePair<string, JsonValue> kv in ObjectValue)
+                    {
+                        if (!first) sb.Append(',');
+                        first = false;
+                        NewLine(sb, indent + 1);
+                        WriteString(sb, kv.Key);
+                        sb.Append(": ");
+                        kv.Value.Write(sb, indent + 1);
+                    }
+                    if (!first) NewLine(sb, indent);
+                    sb.Append('}');
+                    break;
+            }
+        }
+
+        private static void NewLine(StringBuilder sb, int indent)
+        {
+            sb.Append("\r\n");
+            sb.Append(' ', indent * 2);
+        }
+
+        private static void WriteString(StringBuilder sb, string s)
+        {
+            sb.Append('"');
+            foreach (char c in s)
+            {
+                switch (c)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:
+                        if (c < 0x20) sb.Append("\\u").Append(((int)c).ToString("x4"));
+                        else sb.Append(c);
+                        break;
+                }
+            }
+            sb.Append('"');
         }
 
         // ==================================================================

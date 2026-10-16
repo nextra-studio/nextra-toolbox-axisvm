@@ -16,29 +16,40 @@ namespace AxisBridge.Commands
     /// The shared flow of AxPoint / AxLine / AxDomain:
     ///   select (pre-selection works) -> summarise the selection -> dialog (re-shown after viewport
     ///   picks) -> write only what changed -> save the library if it grew.
+    /// With <c>acceptEdges</c> (AxLine) surface and mesh edges may be picked too: each becomes a new
+    /// edge hinge curve before the dialog opens, and is removed again when the dialog is cancelled.
     /// </summary>
     internal static class AttrCommandRunner
     {
         public static Result Run(RhinoDoc doc, string prompt, ObjectType filter, GetObjectGeometryFilter customFilter,
                                  AxGeomKind kind, string[] scalarKeys, string[] familyKeys,
-                                 Func<SelectionState, AxLibrary, RhinoDoc, AttrFormBase> makeForm, string noun)
+                                 Func<SelectionState, AxLibrary, RhinoDoc, AttrFormBase> makeForm, string noun,
+                                 bool acceptEdges = false)
         {
             var go = new GetObject();
             go.SetCommandPrompt(prompt);
             go.GeometryFilter = filter;
             if (customFilter != null) go.SetCustomGeometryFilter(customFilter);
-            go.SubObjectSelect = false;
+            if (acceptEdges) go.GeometryFilter |= ObjectType.EdgeFilter | ObjectType.MeshEdge;
+            go.SubObjectSelect = acceptEdges;
             go.GroupSelect = true;
             go.GetMultiple(1, 0);
             if (go.CommandResult() != Result.Success) return go.CommandResult();
 
             var objs = new List<RhinoObject>();
+            var created = new List<RhinoObject>();
             for (int i = 0; i < go.ObjectCount; i++)
             {
-                RhinoObject o = go.Object(i).Object();
-                if (o != null) objs.Add(o);
+                ObjRef r = go.Object(i);
+                Rhino.Geometry.Curve edge = acceptEdges ? EdgeHinges.EdgeCurve(r) : null;
+                RhinoObject o = edge != null ? EdgeHinges.AddHingeCurve(doc, edge) : r.Object();
+                if (o == null) continue;
+                objs.Add(o);
+                if (edge != null) created.Add(o);
             }
             if (objs.Count == 0) return Result.Nothing;
+            if (created.Count > 0)
+                RhinoApp.WriteLine(string.Format("AxisBridge: {0} edge(s) copied to new edge hinge curve(s) on layer {1}.", created.Count, EdgeHinges.LayerPath));
 
             SelectionState state = SelectionState.From(objs, scalarKeys, familyKeys);
             AxLibrary library = AxLibrary.Load(doc);
@@ -47,14 +58,19 @@ namespace AxisBridge.Commands
             {
                 form.Objects = objs;
                 DialogResult r = ShowWithPicks(form, doc);
-                if (r != DialogResult.OK || form.Result == null) return Result.Cancel;
+                if (r != DialogResult.OK || form.Result == null)
+                {
+                    foreach (RhinoObject o in created) doc.Objects.Delete(o.Id, true);
+                    if (created.Count > 0) doc.Views.Redraw();
+                    return Result.Cancel;
+                }
 
                 if (form.LibraryChanged) form.Library.Save(doc);
 
                 if (form.Result.IsEmpty)
                 {
                     RhinoApp.WriteLine("Nothing was changed.");
-                    return Result.Nothing;
+                    return created.Count > 0 ? Result.Success : Result.Nothing;
                 }
 
                 // Objects may have been replaced while picking; re-fetch them by id.
