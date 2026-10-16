@@ -7,4 +7,4 @@ Commands: AxPoint, AxLine, AxDomain, AxLibrary, AxEdgeHinge, AxVisualize, AxClea
 Workflow: classify geometry in Rhino, run AxExport to save a JSON file, then open "N. Rhino Import" in AxisVM.
 
 Install: run `_PackageManager` in Rhino and search for "Nextra-AxisRhinoImport", or `yak install Nextra-AxisRhinoImport`.
-Docs: https://github.com/Tatsuki0123/AxisVM-plugin
+Docs: https://github.com/nextra-studio/nextra-toolbox-axisvm

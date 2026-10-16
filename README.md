@@ -2,7 +2,7 @@
 
 AxisVM X8 add-ons for model preparation and result extraction, plus the companion Rhino 8 plug-in **Nextra-AxisRhinoImport**. Each tool has its own icon, dialog and illustrated guide. The toolbox keeps growing: new tools are added to one list ([tools.json](tools.json)) and then appear in the installer, the download ZIP and these docs.
 
-**[Install](#install)** | **[Download ZIP](https://github.com/Tatsuki0123/AxisVM-plugin/releases/latest/download/nextra-axisvm-toolbox.zip)** | [Illustrated user guide](AxisVM%20plugin/docs/user-guide/README.md) | [Add a tool](AxisVM%20plugin/docs/ADDING-A-TOOL.md) | [Build from source](AxisVM%20plugin/docs/HOW-TO-BUILD.md)
+**[Install](#install)** | **[Download ZIP](https://github.com/nextra-studio/nextra-toolbox-axisvm/releases/latest/download/nextra-axisvm-toolbox.zip)** | [Illustrated user guide](AxisVM%20plugin/docs/user-guide/README.md) | [Add a tool](AxisVM%20plugin/docs/ADDING-A-TOOL.md) | [Build from source](AxisVM%20plugin/docs/HOW-TO-BUILD.md)
 
 ## Tools
 
@@ -28,7 +28,7 @@ A tool that is still being developed carries **(WIP)** in its AxisVM menu text a
 
 ### 1. Download
 
-**[Download nextra-axisvm-toolbox.zip](https://github.com/Tatsuki0123/AxisVM-plugin/releases/latest/download/nextra-axisvm-toolbox.zip)** and extract it anywhere (for example your Downloads folder). It contains the add-on DLLs, the Rhino plug-in files, `Install-Addons.ps1`, `tools.json` and an offline copy of the install guide.
+**[Download nextra-axisvm-toolbox.zip](https://github.com/nextra-studio/nextra-toolbox-axisvm/releases/latest/download/nextra-axisvm-toolbox.zip)** and extract it anywhere (for example your Downloads folder). It contains the add-on DLLs, the Rhino plug-in files, `Install-Addons.ps1`, `tools.json` and an offline copy of the install guide.
 
 ![On the GitHub Releases page, download nextra-axisvm-toolbox.zip](AxisVM%20plugin/docs/images/install/download-release.svg)
 

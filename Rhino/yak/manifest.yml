@@ -3,7 +3,7 @@ version: 1.0.0
 authors:
 - Tatsuki
 description: Rhino 8 companion of the Nextra AxisVM toolbox. Classify geometry with AxPoint, AxLine and AxDomain, manage materials, sections and load cases with AxLibrary, and export a JSON model with AxExport for the Rhino Import add-on in AxisVM.
-url: https://github.com/Tatsuki0123/AxisVM-plugin
+url: https://github.com/nextra-studio/nextra-toolbox-axisvm
 keywords:
 - axisvm
 - structural
