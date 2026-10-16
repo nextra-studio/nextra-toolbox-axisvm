@@ -112,13 +112,11 @@ internal static class RhinoUpdateLiveChecks
         // The mark is the file name, so every step imports "under" the same one.
         string linkPath = Path.Combine(Path.GetTempPath(), "nextra-update-check.json");
 
-        AxisVmDialogGuard.Start();
-        app = (IAxisVMApplication)Activator.CreateInstance(Type.GetTypeFromProgID("AxisVM.AxisVMApplication"));
+        app = AxisVmDialogGuard.Launch();
         try
         {
             while (app.Loaded != ELongBoolean.lbTrue) System.Threading.Thread.Sleep(200);
-            if (app.Models.Count < 1) app.Models.New();
-            model = app.Models.Item[1];
+            model = AxisVmDialogGuard.FreshModel(app);
             Check(model.Lines.Count == 0, "axisvm: fresh empty model in a separate AxisVM");
 
             int u1 = model.Nodes.Add(-50, 0, 0), u2 = model.Nodes.Add(-45, 0, 0);
@@ -222,6 +220,14 @@ internal static class RhinoUpdateLiveChecks
         return null;
     }
 
+    private static JsonValue LibEntry(JsonValue lib, string list, string name)
+    {
+        JsonValue arr = lib == null ? null : lib[list];
+        for (int i = 0; arr != null && i < arr.Count; i++)
+            if (string.Equals(LinkFile.Get(arr.At(i), "name"), name, StringComparison.OrdinalIgnoreCase)) return arr.At(i);
+        return null;
+    }
+
     private static bool Changed(JsonValue e) { return e != null && e["changed"] != null && e["changed"].BoolValue; }
 
     private static bool Deleted(JsonValue section, string guid)
@@ -257,13 +263,11 @@ internal static class RhinoUpdateLiveChecks
             .Set(LinkFile.RhinoSection, exported.Set("sent", JsonValue.Str("2026-01-01T00:00:00.000Z")).Set("basedOnAxisvm", JsonValue.Str("")));
         File.WriteAllText(linkPath, link.ToJson());
 
-        AxisVmDialogGuard.Start();
-        app = (IAxisVMApplication)Activator.CreateInstance(Type.GetTypeFromProgID("AxisVM.AxisVMApplication"));
+        app = AxisVmDialogGuard.Launch();
         try
         {
             while (app.Loaded != ELongBoolean.lbTrue) System.Threading.Thread.Sleep(200);
-            if (app.Models.Count < 1) app.Models.New();
-            model = app.Models.Item[1];
+            model = AxisVmDialogGuard.FreshModel(app);
             Check(model.Lines.Count == 0, "axisvm: fresh empty model in a separate AxisVM");
 
             // ---- 1. load, send at once: nothing changed --------------------------------------------
@@ -361,6 +365,98 @@ internal static class RhinoUpdateLiveChecks
 
             r = RhinoLinkSender.Send(model, linkPath);
             Check(r.Changed == 0 && r.Adopted == 0 && r.Deleted == 0, "send after that load: nothing changed");
+
+            // ---- 6. library: materials, sections, load cases, combinations ---------------------------------
+            model.CrossSections.AddRectangular("LibRect300x500", 0.3, 0.5, ECrossSectionProcess.cspRolled);
+            model.CrossSections.AddPipe("LibPipe168x8", 0.1683, 0.008, ECrossSectionProcess.cspRolled);
+            model.Materials.AddFromCatalog(ENationalDesignCode.ndcEuroCode, "C25/30");
+            int wind = model.LoadCases.Add("LibWind", ELoadCaseType.lctStandard);
+            Array cf = Array.CreateInstance(typeof(double), new[] { 2 }, new[] { 1 }); cf.SetValue(1.35, 1); cf.SetValue(1.5, 2);
+            Array ci = Array.CreateInstance(typeof(int), new[] { 2 }, new[] { 1 }); ci.SetValue(1, 1); ci.SetValue(wind, 2);
+            int combo = model.LoadCombinations.Add("LibULS", ECombinationType.ctULS, cf, ci);
+            Check(wind > 0 && combo > 0, "library: a load case and a combination were made in AxisVM (" + wind + ", " + combo + ")");
+
+            r = RhinoLinkSender.Send(model, linkPath);
+            JsonValue lib = Section(linkPath)["library"];
+            Console.WriteLine(string.Format("      library sent: {0} materials, {1} sections, {2} load cases, {3} combinations; {4} new for Rhino", r.Library[0], r.Library[1], r.Library[2], r.Library[3], r.LibraryNew));
+            JsonValue rect = LibEntry(lib, "sections", "LibRect300x500"), pipe = LibEntry(lib, "sections", "LibPipe168x8");
+            Check(rect != null && LinkFile.Get(rect, "shape") == "Rectangle" && Math.Abs(rect["b"].AsDouble(0) - 300) < 0.01 && Math.Abs(rect["h"].AsDouble(0) - 500) < 0.01,
+                "library: a rectangular section arrives as Rectangle 300 x 500 mm (" + (rect == null ? "missing" : rect.ToJson().Replace("\r\n", " ")) + ")");
+            Check(pipe != null && LinkFile.Get(pipe, "shape") == "Pipe" && Math.Abs(pipe["h"].AsDouble(0) - 168.3) < 0.01 && Math.Abs(pipe["t"].AsDouble(0) - 8) < 0.01,
+                "library: a pipe section arrives as Pipe d=168.3 t=8 mm (" + (pipe == null ? "missing" : pipe.ToJson().Replace("\r\n", " ")) + ")");
+            JsonValue ipe = LibEntry(lib, "sections", "IPE 300");
+            Check(ipe != null && LinkFile.Get(ipe, "shape") == "Catalog", "library: a catalog profile arrives by name (IPE 300)");
+            Check(LibEntry(lib, "materials", "C25/30") != null && LinkFile.Get(LibEntry(lib, "materials", "C25/30"), "family") == "Concrete", "library: a material arrives with its family");
+            Check(LibEntry(lib, "loadCases", "LibWind") != null, "library: the load case arrives");
+            JsonValue lc = LibEntry(lib, "combinations", "LibULS");
+            Check(lc != null && LinkFile.Get(lc, "type") == "ULS" && lc["terms"].Count == 2
+                  && LinkFile.Get(lc["terms"].At(1), "case") == "LibWind" && Math.Abs(lc["terms"].At(1)["factor"].AsDouble(0) - 1.5) < 1e-9,
+                "library: the combination arrives with its type and factor x case terms");
+            Check(r.LibraryNew >= 5 && LinkFile.ReadStatus(LinkFile.Read(linkPath)).AxisVmPending, "library: the new entries count as changes waiting for Rhino (" + r.LibraryNew + ")");
+            RhinoLinkSender.MarkLoaded(model, linkPath, rhinoSent);
+
+            // Rhino library -> AxisVM: a combination defined in Rhino is created on load
+            LinkFile.Update(linkPath, root =>
+            {
+                JsonValue rl = root[LinkFile.RhinoSection]["library"];
+                if (rl == null) { rl = JsonValue.Obj(); root[LinkFile.RhinoSection].Set("library", rl); }
+                if (rl["combinations"] == null) rl.Set("combinations", JsonValue.Arr());
+                rl["combinations"].Add(JsonValue.Obj().Set("name", JsonValue.Str("RhinoSLS")).Set("type", JsonValue.Str("SLSChar"))
+                    .Set("terms", JsonValue.Arr()
+                        .Add(JsonValue.Obj().Set("case", JsonValue.Str("Dead")).Set("factor", JsonValue.Num(1.0)))
+                        .Add(JsonValue.Obj().Set("case", JsonValue.Str("RhinoOnlyCase")).Set("factor", JsonValue.Num(0.7)))));
+                root[LinkFile.RhinoSection].Set("sent", JsonValue.Str("2026-01-03T00:00:00.000Z"));
+            });
+            LoadFromRhino(linkPath, lengthToM, new List<string>());
+            JsonValue after = Section(linkPath);
+            JsonValue made = LibEntry(Section(linkPath)["library"] ?? JsonValue.Obj(), "combinations", "RhinoSLS");
+            RhinoLinkSender.Send(model, linkPath);
+            JsonValue lib2 = Section(linkPath)["library"];
+            JsonValue slsCombo = LibEntry(lib2, "combinations", "RhinoSLS");
+            Check(slsCombo != null && LinkFile.Get(slsCombo, "type") == "SLSChar" && slsCombo["terms"].Count == 2 && LibEntry(lib2, "loadCases", "RhinoOnlyCase") != null,
+                "library: a combination from Rhino's library is created in AxisVM, with the load case it names");
+            Check(LibEntry(lib2, "sections", "LibRect300x500") != null && LibEntry(lib2, "combinations", "LibULS") != null,
+                "library: nothing AxisVM-made is removed by loading Rhino's model");
+
+            // ---- 7. load panels --------------------------------------------------------------------------
+            int[] pn = new int[4]; int[] pl = new int[4];
+            double[][] corner = { new[] { 300.0, 0, 0 }, new[] { 304.0, 0, 0 }, new[] { 304.0, 4, 0 }, new[] { 300.0, 4, 0 } };
+            for (int k = 0; k < 4; k++) pn[k] = model.Nodes.Add(corner[k][0], corner[k][1], corner[k][2]);
+            for (int k = 0; k < 4; k++) { RLineGeomData lg = new RLineGeomData(); pl[k] = model.Lines.Add(pn[k], pn[(k + 1) % 4], ELineGeomType.lgtStraightLine, ref lg); }
+            Array plIds = Array.CreateInstance(typeof(int), new[] { 4 }, new[] { 1 });
+            for (int k = 0; k < 4; k++) plIds.SetValue(pl[k], k + 1);
+            int panelsBefore = model.LoadPanels.Count;
+            int panel = model.LoadPanels.AddFromLineIDs(ref plIds);
+            Check(panel > 0 && model.LoadPanels.Count == panelsBefore + 1, "panel: a load panel was drawn in AxisVM");
+
+            r = RhinoLinkSender.Send(model, linkPath);
+            sec = Section(linkPath);
+            JsonValue pe = null;
+            for (int i = 0; sec["domains"] != null && i < sec["domains"].Count; i++)
+                if (LinkFile.Get(sec["domains"].At(i)["attrs"], "Ax_FEType") == "LoadPanel") pe = sec["domains"].At(i);
+            Check(pe != null && pe["new"].BoolValue && Changed(pe) && pe["contour"].Count == 4,
+                "panel: it is sent as a new LoadPanel surface with its 4-corner outline");
+            string panelGuid = pe == null ? "" : LinkFile.Get(pe, "guid");
+
+            r = RhinoLinkSender.Send(model, linkPath);
+            Check(r.Adopted == 0, "panel: sending again does not adopt it a second time");
+
+            // Rhino has loaded it: the file's rhino section now holds a LoadPanel domain with that id
+            LinkFile.Update(linkPath, root =>
+            {
+                JsonValue rh = root[LinkFile.RhinoSection];
+                JsonValue contour = JsonValue.Arr();
+                foreach (double[] c in corner) contour.Add(JsonValue.Xyz(c[0] / lengthToM, c[1] / lengthToM, c[2] / lengthToM));
+                rh["domains"].Add(JsonValue.Obj().Set("guid", JsonValue.Str(panelGuid)).Set("contour", contour)
+                    .Set("attrs", JsonValue.Obj().Set("Ax_FEType", JsonValue.Str("LoadPanel")).Set("Ax_Guid", JsonValue.Str(panelGuid))));
+                rh.Set("seenAxisvmGuids", JsonValue.Arr().Add(JsonValue.Str(panelGuid)));
+                rh.Set("sent", JsonValue.Str("2026-01-04T00:00:00.000Z"));
+            });
+            LoadFromRhino(linkPath, lengthToM, new List<string>());
+            int panelsAfter = model.LoadPanels.Count;
+            Check(panelsAfter == panelsBefore + 1, "panel: Rhino holds it now - loading rebuilds exactly one panel, not two (" + panelsAfter + " vs " + (panelsBefore + 1) + ")");
+            r = RhinoLinkSender.Send(model, linkPath);
+            Check(r.Adopted == 0 && r.Deleted == 0, "panel: after that load it is an ordinary linked element - nothing to send");
 
             Console.WriteLine();
             Console.WriteLine(failures == 0 ? "All live link checks passed." : failures + " live link check(s) failed.");

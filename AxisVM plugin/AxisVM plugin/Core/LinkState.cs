@@ -263,12 +263,10 @@ namespace AxisVM_plugin.Core
             return string.Join("|", geom, type, SectionName(model, a.StartCrossSectionIndex), SectionName(model, a.EndCrossSectionIndex), MaterialName(model, a.MaterialIndex));
         }
 
-        /// <summary>Domain: "sorted contour/hole segments|type|thickness [m]|material".</summary>
-        public static string DomainState(IAxisVMModel model, int domainId)
+        /// <summary>The sorted end-point pairs of some lines: the shape of a domain or load panel outline, order independent.</summary>
+        public static string SegmentsState(IAxisVMModel model, List<int> lines)
         {
             List<string> segs = new List<string>();
-            List<int> lines = ContourLines(model, domainId);
-            foreach (List<int> h in HoleLines(model, domainId)) lines.AddRange(h);
             foreach (int l in lines)
             {
                 int[] n = LineNodes(model, l);
@@ -277,10 +275,19 @@ namespace AxisVM_plugin.Core
                 segs.Add(string.CompareOrdinal(a, b) < 0 ? a + ">" + b : b + ">" + a);
             }
             segs.Sort(StringComparer.Ordinal);
+            return string.Join(";", segs);
+        }
+
+        /// <summary>Domain: "sorted contour/hole segments|type|thickness [m]|material".</summary>
+        public static string DomainState(IAxisVMModel model, int domainId)
+        {
+            List<int> lines = ContourLines(model, domainId);
+            foreach (List<int> h in HoleLines(model, domainId)) lines.AddRange(h);
+            string segs = SegmentsState(model, lines);
 
             RSurfaceAttr s;
-            if (!TrySurfaceAttr(model, domainId, out s)) return string.Join(";", segs) + "|||";
-            return string.Join("|", string.Join(";", segs), SurfaceTypeName(s.SurfaceType),
+            if (!TrySurfaceAttr(model, domainId, out s)) return segs + "|||";
+            return string.Join("|", segs, SurfaceTypeName(s.SurfaceType),
                 s.Thickness.ToString("0.######", CultureInfo.InvariantCulture), MaterialName(model, s.MaterialId));
         }
 

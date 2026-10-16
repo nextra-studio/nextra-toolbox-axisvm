@@ -13,6 +13,10 @@ namespace AxisVM_plugin.Core
         public int Unchanged;
         public int Adopted;
         public int Deleted;
+        /// <summary>Materials, cross-sections, load cases and load combinations in the library that was sent.</summary>
+        public int[] Library = new int[4];
+        /// <summary>Library entries Rhino does not have yet.</summary>
+        public int LibraryNew;
         public readonly List<string> Notes = new List<string>();
     }
 
@@ -57,8 +61,14 @@ namespace AxisVM_plugin.Core
 
             HashSet<string> present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             section.Set("lines", Lines(model, key, rhinoKnows, rhinoStarts, present, section, res));
-            section.Set("domains", Domains(model, key, rhinoKnows, present, section, res));
+            JsonValue domains = Domains(model, key, rhinoKnows, present, section, res);
+            Panels(model, key, rhinoKnows, present, section, domains, res);
+            section.Set("domains", domains);
             section.Set("points", Points(model, key, present, res));
+
+            JsonValue library = LinkLibrary.Read(model, out res.Library);
+            res.LibraryNew = LinkLibrary.CountNew(library, LinkFile.IsLink(current) ? current[LinkFile.RhinoSection] : current);
+            section.Set("library", library).Set("libraryNew", JsonValue.Num(res.LibraryNew));
 
             JsonValue deleted = JsonValue.Arr();
             JsonValue built = section["built"];
@@ -69,7 +79,7 @@ namespace AxisVM_plugin.Core
             }
             section.Set("deleted", deleted);
 
-            res.Notes.Add("Supports, loads, releases, springs, links and load panels made or changed in AxisVM are not sent to Rhino. " +
+            res.Notes.Add("Supports, loads, releases, springs and links made or changed in AxisVM are not sent to Rhino. " +
                           "The next 'Load from Rhino' rebuilds these elements from Rhino, so add them in Rhino to keep them.");
             JsonValue notes = JsonValue.Arr();
             foreach (string n in res.Notes) notes.Add(JsonValue.Str(n));
@@ -460,6 +470,90 @@ namespace AxisVM_plugin.Core
                 pts.Add(p);
             }
             return DropStraight(pts, true);
+        }
+
+        // ==================================================================
+        // Load panels
+        // ==================================================================
+
+        /// <summary>
+        /// "guid|outline state" on every contour line of a load panel drawn in AxisVM. Load panels cannot carry
+        /// attachments themselves; their contour lines do, and AxisModelBuilder.Link deletes the panel with its lines.
+        /// </summary>
+        private const string PanelAttachment = "RhinoPanel";
+
+        /// <summary>
+        /// Load panels drawn in AxisVM become Rhino surfaces with Ax_FEType = LoadPanel (two-way). A panel whose contour
+        /// lines all came from an import is Rhino's own and is left alone. Sent in the "domains" list.
+        /// </summary>
+        private static void Panels(IAxisVMModel model, string key, HashSet<string> rhinoKnows, HashSet<string> present,
+                                   JsonValue section, JsonValue arr, SendResult res)
+        {
+            AxisVMAttachments la = model.Lines.Attachments;
+            int n;
+            try { n = model.LoadPanels.Count; } catch { return; }
+
+            for (int i = 1; i <= n; i++)
+            {
+                List<int> lines;
+                try
+                {
+                    Array ids = null;
+                    model.LoadPanels.Item[i].GetContourLineIDs(ref ids);
+                    lines = LinkState.IntList(ids);
+                }
+                catch { continue; }
+                if (lines.Count < 3) continue;
+
+                string guid = null, baseline = "";
+                bool allImported = true;
+                foreach (int l in lines)
+                {
+                    string stamp = LinkState.Read(la, PanelAttachment, l);
+                    if (stamp != null && guid == null)
+                    {
+                        int bar = stamp.IndexOf('|');
+                        guid = bar < 0 ? stamp : stamp.Substring(0, bar);
+                        baseline = bar < 0 ? "" : stamp.Substring(bar + 1);
+                    }
+                    if (LinkState.Read(la, LinkState.Link, l) == null) allImported = false;
+                }
+
+                string state = LinkState.SegmentsState(model, lines);
+                bool isNew;
+                if (guid == null)
+                {
+                    if (allImported) continue;   // Rhino's own panel
+                    guid = System.Guid.NewGuid().ToString();
+                    foreach (int l in lines)
+                    {
+                        LinkState.Write(la, PanelAttachment, l, guid + "|" + state);
+                        AdoptEdge(la, l, key, guid);
+                    }
+                    Built(section, guid, 0);
+                    res.Adopted++;
+                    isNew = true;
+                }
+                else isNew = !rhinoKnows.Contains(guid);
+                present.Add(guid);
+
+                JsonValue e = JsonValue.Obj().Set("guid", JsonValue.Str(guid));
+                List<double[]> outline = Loop(model, lines);
+                if (outline == null)
+                {
+                    res.Notes.Add(string.Format("Load panel {0}: its outline could not be traced; its shape was not sent.", Short(guid)));
+                    continue;
+                }
+                JsonValue contour = JsonValue.Arr();
+                foreach (double[] p in outline) contour.Add(P(p));
+                e.Set("contour", contour);
+
+                bool geomChanged = isNew || state != baseline;
+                e.Set("changed", JsonValue.Bool(geomChanged)).Set("geomChanged", JsonValue.Bool(geomChanged)).Set("new", JsonValue.Bool(isNew))
+                 .Set("attrs", JsonValue.Obj().Set("Ax_FEType", JsonValue.Str("LoadPanel")));
+                if (geomChanged) res.Changed++; else res.Unchanged++;
+                arr.Add(e);
+            }
         }
 
         // ==================================================================

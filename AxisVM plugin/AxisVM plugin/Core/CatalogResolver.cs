@@ -597,6 +597,50 @@ namespace AxisVM_plugin.Core
         }
 
         /// <summary>
+        /// Creates the Rhino library's load combinations that the model does not have yet (by name, case-insensitive;
+        /// existing ones are left alone). Their load cases are created first when missing.
+        /// </summary>
+        public void CreateLibraryCombinations()
+        {
+            if (library.Combinations.Count == 0) return;
+
+            HashSet<string> existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                int n = model.LoadCombinations.Count;
+                for (int i = 1; i <= n; i++) existing.Add((model.LoadCombinations.get_Name(i) ?? "").Trim());
+            }
+            catch { }
+
+            foreach (RhinoLibCombination c in library.Combinations)
+            {
+                if (existing.Contains(c.Name)) continue;
+
+                int count = c.Terms.Count;
+                Array factors = Array.CreateInstance(typeof(double), new[] { count }, new[] { 1 });
+                Array ids = Array.CreateInstance(typeof(int), new[] { count }, new[] { 1 });
+                for (int k = 0; k < count; k++)
+                {
+                    factors.SetValue(c.Terms[k].Value, k + 1);
+                    ids.SetValue(LoadCase(c.Terms[k].Key), k + 1);
+                }
+
+                ECombinationType type;
+                if (!Enum.TryParse<ECombinationType>("ct" + c.Type, true, out type)) type = ECombinationType.ctOther;
+
+                int id;
+                try { id = model.LoadCombinations.Add(c.Name, type, factors, ids); }
+                catch (Exception ex)
+                {
+                    notes.Add(string.Format("Load combination '{0}' could not be created ({1}).", c.Name, ex.Message));
+                    continue;
+                }
+                if (id > 0) notes.Add(string.Format("Load combination '{0}' was created from the Rhino library.", c.Name));
+                else notes.Add(string.Format("AxisVM rejected the load combination '{0}' (code {1}).", c.Name, id));
+            }
+        }
+
+        /// <summary>
         /// Resolves a load case by name (case-insensitive), creating a standard case when it does not
         /// exist yet. AxisVM's load case collection has no IndexOf, so the lookup is a name scan.
         /// </summary>

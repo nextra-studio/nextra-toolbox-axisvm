@@ -214,11 +214,20 @@ namespace AxisVM_plugin.Core
         public string CatalogName = "";
     }
 
+    /// <summary>A load combination of the Rhino library: its AxisVM type ("ULS", "SLSChar", ...) and "factor x load case" terms.</summary>
+    public class RhinoLibCombination
+    {
+        public string Name = "";
+        public string Type = "Other";
+        public List<KeyValuePair<string, double>> Terms = new List<KeyValuePair<string, double>>();
+    }
+
     public class RhinoLibrary
     {
         public List<string> Materials = new List<string>();
         public List<RhinoLibSection> Sections = new List<RhinoLibSection>();
         public List<string> LoadCases = new List<string>();
+        public List<RhinoLibCombination> Combinations = new List<RhinoLibCombination>();
 
         public RhinoLibSection FindSection(string name)
         {
@@ -465,6 +474,21 @@ namespace AxisVM_plugin.Core
                 {
                     string n = Get(cases.At(i), "name", "").Trim();
                     if (n.Length > 0) m.Library.LoadCases.Add(n);
+                }
+
+            JsonValue combos = lib["combinations"];
+            if (combos != null && combos.Type == JsonValue.JsonType.Array)
+                for (int i = 0; i < combos.Count; i++)
+                {
+                    JsonValue c = combos.At(i);
+                    RhinoLibCombination combo = new RhinoLibCombination { Name = Get(c, "name", "").Trim(), Type = Get(c, "type", "Other").Trim() };
+                    JsonValue terms = c["terms"];
+                    for (int k = 0; terms != null && k < terms.Count; k++)
+                    {
+                        string lc = Get(terms.At(k), "case", "").Trim();
+                        if (lc.Length > 0) combo.Terms.Add(new KeyValuePair<string, double>(lc, terms.At(k)["factor"] != null ? terms.At(k)["factor"].AsDouble(1.0) : 1.0));
+                    }
+                    if (combo.Name.Length > 0 && combo.Terms.Count > 0) m.Library.Combinations.Add(combo);
                 }
         }
 

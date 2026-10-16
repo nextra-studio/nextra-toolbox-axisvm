@@ -184,7 +184,7 @@ namespace AxisBridge.Link
             foreach (string list in new[] { "points", "lines", "domains" })
                 foreach (JToken e in (ax[list] as JArray) ?? new JArray())
                     if (e["changed"] != null && e["changed"].Type == JTokenType.Boolean && (bool)e["changed"]) n++;
-            return n + ((ax["deleted"] as JArray) ?? new JArray()).Count;
+            return n + ((ax["deleted"] as JArray) ?? new JArray()).Count + (ax["libraryNew"] != null ? (int)ax["libraryNew"] : 0);
         }
 
         // ==================================================================
@@ -214,6 +214,8 @@ namespace AxisBridge.Link
         public class LoadResult
         {
             public int Moved, Updated, Created, Deleted, Unchanged;
+            /// <summary>What the merge of AxisVM's library added to this document's library.</summary>
+            public AxisBridge.Library.AxLibrary.MergeResult Library = new AxisBridge.Library.AxLibrary.MergeResult();
             public bool NothingNew;
             public readonly List<string> Notes = new List<string>();
             public ExportResult Resent;
@@ -273,6 +275,14 @@ namespace AxisBridge.Link
             finally
             {
                 doc.EndUndoRecord(undo);
+            }
+
+            // Materials, sections, load cases and combinations AxisVM defines that this library lacks.
+            if (ax["library"] != null)
+            {
+                AxisBridge.Library.AxLibrary lib = AxisBridge.Library.AxLibrary.Load(doc);
+                res.Library = lib.MergeFrom(ax["library"]);
+                if (res.Library.Total > 0) lib.Save(doc);
             }
 
             doc.Strings.SetString("AxisBridge.Link.basedOnAxisvm|" + Key(path), sent);

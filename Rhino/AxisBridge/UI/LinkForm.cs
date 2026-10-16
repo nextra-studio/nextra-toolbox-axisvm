@@ -176,6 +176,9 @@ namespace AxisBridge.UI
                 sb.AppendLine(string.Format("Created:           {0}   (drawn in AxisVM, layers AxisVM::*)", r.Created));
                 sb.AppendLine(string.Format("Deleted:           {0}", r.Deleted));
                 sb.AppendLine(string.Format("Unchanged:         {0}", r.Unchanged));
+                if (r.Library.Total > 0)
+                    sb.AppendLine(string.Format("Library added:     {0} material(s), {1} section(s), {2} load case(s), {3} combination(s)",
+                        r.Library.Materials, r.Library.Sections, r.Library.LoadCases, r.Library.Combinations));
                 if (r.Resent != null) sb.AppendLine("\r\nThe merged model was sent back to the link file, so AxisVM keeps these changes on its next 'Load from Rhino'.");
             }
             foreach (string n in r.Notes) sb.AppendLine("\r\n- " + n);

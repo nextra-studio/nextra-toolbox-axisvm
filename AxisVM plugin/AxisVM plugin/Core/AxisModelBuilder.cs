@@ -266,7 +266,7 @@ namespace AxisVM_plugin.Core
                 }
             }
 
-            if (!opt.DryRun) catalog.CreateLibraryLoadCases();
+            if (!opt.DryRun) { catalog.CreateLibraryLoadCases(); catalog.CreateLibraryCombinations(); }
 
             BuildGeometry();
 

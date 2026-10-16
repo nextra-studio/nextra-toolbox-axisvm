@@ -2,8 +2,9 @@
 // elements deleted", "Save changes?", ...). Each one blocks the COM call that caused it until someone clicks it,
 // which looks like a hang. Only safe answers are ever pressed: OK, No or Cancel - never Yes or Save.
 //
-// Usage: AxisVmDialogGuard.Start() right after Activator.CreateInstance; it watches every AxisVM process started
-// after that moment (never one that was already open) and logs each dialog it closed.
+// Usage: app = AxisVmDialogGuard.Launch() instead of Activator.CreateInstance. Launch REFUSES to start while any AxisVM is
+// already open (a COM start would attach to it and the check would run inside the user's session), and the guard only ever
+// touches the one process Launch created - never an AxisVM the user opens later - and logs each dialog it closed.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -30,12 +31,61 @@ internal static class AxisVmDialogGuard
     /// <summary>Button captions pressed, best first.</summary>
     private static readonly string[] Safe = { "No", "OK", "Cancel" };
 
-    private static DateTime since;
+    /// <summary>The single AxisVM process this check created (0 until it is known). The guard acts on nothing else.</summary>
+    private static int ownedPid;
 
-    public static void Start()
+    private static List<int> AxisVmPids()
     {
-        since = DateTime.Now.AddSeconds(-5);
+        List<int> pids = new List<int>();
+        foreach (Process p in Process.GetProcesses())
+        {
+            try { if (p.ProcessName.IndexOf("axisvm", StringComparison.OrdinalIgnoreCase) >= 0) pids.Add(p.Id); } catch { }
+        }
+        return pids;
+    }
+
+    /// <summary>Starts a new AxisVM through COM, or throws when one is already open. See the file header.</summary>
+    public static AxisVM.IAxisVMApplication Launch()
+    {
+        List<int> open = AxisVmPids();
+        if (open.Count > 0)
+            throw new InvalidOperationException("AxisVM is already open (process " + open[0] + "). Close it first: a check never shares or touches an AxisVM that is already running.");
+
         new Thread(Watch) { IsBackground = true, Name = "AxisVM dialog guard" }.Start();
+        AxisVM.IAxisVMApplication app = (AxisVM.IAxisVMApplication)Activator.CreateInstance(Type.GetTypeFromProgID("AxisVM.AxisVMApplication"));
+
+        // The process this created: the one AxisVM that exists now.
+        for (int i = 0; i < 100 && ownedPid == 0; i++)
+        {
+            List<int> now = AxisVmPids();
+            if (now.Count == 1) ownedPid = now[0];
+            else if (now.Count > 1) throw new InvalidOperationException("More than one AxisVM started - cannot tell which one belongs to this check.");
+            else Thread.Sleep(100);
+        }
+        if (ownedPid == 0) throw new InvalidOperationException("The AxisVM this check started could not be found.");
+        return app;
+    }
+
+    /// <summary>
+    /// A new, empty model in the AxisVM the check started. A fresh AxisVM can open the user's last project (it did once: a real
+    /// Box folder model), so a check must never take model 1 for granted: it creates its own and picks an empty one, and
+    /// refuses to continue when it cannot find one.
+    /// </summary>
+    public static AxisVM.IAxisVMModel FreshModel(AxisVM.IAxisVMApplication app)
+    {
+        AxisVM.IAxisVMModels models = app.Models;
+        int created = models.New();   // the index of the new model
+        if (created >= 1 && created <= models.Count)
+        {
+            AxisVM.IAxisVMModel fresh = models.Item[created];
+            try { if (fresh.Nodes.Count == 0 && fresh.Lines.Count == 0 && fresh.Domains.Count == 0) return fresh; } catch { }
+        }
+        for (int i = models.Count; i >= 1; i--)
+        {
+            AxisVM.IAxisVMModel m = models.Item[i];
+            try { if (m.Nodes.Count == 0 && m.Lines.Count == 0 && m.Domains.Count == 0) return m; } catch { }
+        }
+        throw new InvalidOperationException("No empty model could be created in the scratch AxisVM - refusing to run on an existing model.");
     }
 
     private static void Watch()
@@ -44,16 +94,12 @@ internal static class AxisVmDialogGuard
         {
             try
             {
-                HashSet<int> pids = new HashSet<int>();
-                foreach (Process p in Process.GetProcesses())
+                int pid = ownedPid;
+                if (pid != 0)
                 {
-                    try
-                    {
-                        if (p.ProcessName.IndexOf("axisvm", StringComparison.OrdinalIgnoreCase) >= 0 && p.StartTime >= since) pids.Add(p.Id);
-                    }
-                    catch { }
+                    HashSet<int> pids = new HashSet<int> { pid };
+                    EnumWindows((h, l) => { Inspect(h, pids); return true; }, IntPtr.Zero);
                 }
-                if (pids.Count > 0) EnumWindows((h, l) => { Inspect(h, pids); return true; }, IntPtr.Zero);
             }
             catch { }
             Thread.Sleep(400);

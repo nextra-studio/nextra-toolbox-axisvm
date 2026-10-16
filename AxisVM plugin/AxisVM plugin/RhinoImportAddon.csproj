@@ -68,6 +68,7 @@
     <Compile Include="Core\AxisModelBuilder.Link.cs" />
     <Compile Include="Core\LinkFile.cs" />
     <Compile Include="Core\LinkState.cs" />
+    <Compile Include="Core\LinkLibrary.cs" />
     <Compile Include="Core\RhinoLinkSender.cs" />
     <Compile Include="Core\SpringParamResolver.cs" />
     <Compile Include="Core\AttributeParser.cs" />

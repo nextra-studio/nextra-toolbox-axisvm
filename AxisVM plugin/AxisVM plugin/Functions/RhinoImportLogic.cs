@@ -132,6 +132,10 @@ namespace AxisVM_plugin.Functions
                 sb.AppendLine(string.Format("  new          {0}   (drawn in AxisVM - Rhino creates them)", r.Adopted));
                 sb.AppendLine(string.Format("  deleted      {0}", r.Deleted));
                 sb.AppendLine();
+                sb.AppendLine("Library (always sent in full; Rhino adds what it lacks)");
+                sb.AppendLine(string.Format("  {0} material(s), {1} section(s), {2} load case(s), {3} combination(s)   ({4} not in Rhino yet)",
+                    r.Library[0], r.Library[1], r.Library[2], r.Library[3], r.LibraryNew));
+                sb.AppendLine();
                 sb.AppendLine("Notes");
                 foreach (string n in r.Notes) sb.AppendLine("  - " + n);
                 sb.AppendLine();

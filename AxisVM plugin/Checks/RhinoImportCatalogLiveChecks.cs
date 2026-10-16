@@ -60,14 +60,11 @@ internal static class RhinoImportCatalogLiveChecks
         Check(CatalogResolver.CatalogFilePath("HEA_PL") != null && CatalogResolver.CatalogFilePath("HEA_PL").EndsWith("HEA_PL.SEC", StringComparison.OrdinalIgnoreCase)
               && CatalogResolver.CatalogFilePath("NO_SUCH_TABLE") == null, "resolver: catalog file found from the registered AxisVM (" + CatalogResolver.CatalogFilePath("HEA_PL") + ")");
 
-        AxisVmDialogGuard.Start();
-        IAxisVMApplication app = (IAxisVMApplication)Activator.CreateInstance(Type.GetTypeFromProgID("AxisVM.AxisVMApplication"));
+        IAxisVMApplication app = AxisVmDialogGuard.Launch();
         try
         {
             while (app.Loaded != ELongBoolean.lbTrue) System.Threading.Thread.Sleep(200);
-            IAxisVMModels models = app.Models;
-            if (models.Count < 1) models.New();
-            IAxisVMModel model = models.Item[1];
+            IAxisVMModel model = AxisVmDialogGuard.FreshModel(app);
             Check(model.Lines.Count == 0 && model.CrossSections.Count == 0, "axisvm: fresh empty model in a separate AxisVM");
 
             var opt = new ImportOptions { Units = new AxUnits { LengthToM = 1.0, LengthName = "m" }, MergeToleranceM = 0.001, AutoIntersect = false, SourcePath = jsonPath };
@@ -105,14 +102,11 @@ internal static class RhinoImportCatalogLiveChecks
         RhinoModel rhino = RhinoModel.FromJson(JsonValue.Parse(File.ReadAllText(jsonPath)), notes);
         Console.WriteLine("      read " + rhino.Points.Count + " points, " + rhino.Lines.Count + " lines, " + rhino.Domains.Count + " domains from " + jsonPath);
 
-        AxisVmDialogGuard.Start();
-        IAxisVMApplication app = (IAxisVMApplication)Activator.CreateInstance(Type.GetTypeFromProgID("AxisVM.AxisVMApplication"));
+        IAxisVMApplication app = AxisVmDialogGuard.Launch();
         try
         {
             while (app.Loaded != ELongBoolean.lbTrue) System.Threading.Thread.Sleep(200);
-            IAxisVMModels models = app.Models;
-            if (models.Count < 1) models.New();
-            IAxisVMModel model = models.Item[1];
+            IAxisVMModel model = AxisVmDialogGuard.FreshModel(app);
 
             var opt = new ImportOptions { Units = new AxUnits { LengthToM = 0.001, LengthName = "mm" }, MergeToleranceM = 0.001, AutoIntersect = true, SourcePath = jsonPath };
             var builder = new AxisModelBuilder(app, model, rhino, opt, notes);
@@ -285,14 +279,11 @@ internal static class RhinoImportCatalogLiveChecks
 
     private static int ExportCheck(string folder)
     {
-        AxisVmDialogGuard.Start();
-        IAxisVMApplication app = (IAxisVMApplication)Activator.CreateInstance(Type.GetTypeFromProgID("AxisVM.AxisVMApplication"));
+        IAxisVMApplication app = AxisVmDialogGuard.Launch();
         try
         {
             while (app.Loaded != ELongBoolean.lbTrue) System.Threading.Thread.Sleep(200);
-            IAxisVMModels models = app.Models;
-            if (models.Count < 1) models.New();
-            IAxisVMModel model = models.Item[1];
+            IAxisVMModel model = AxisVmDialogGuard.FreshModel(app);
             int mats0 = model.Materials.Count, secs0 = model.CrossSections.Count;
 
             if (Directory.Exists(folder)) foreach (string f in Directory.GetFiles(folder, "*.csv")) File.Delete(f);

@@ -178,7 +178,8 @@ namespace AxisVM_plugin.Core
                 }
             }
             JsonValue del = axisvm["deleted"];
-            return n + (del != null ? del.Count : 0);
+            JsonValue lib = axisvm["libraryNew"];
+            return n + (del != null ? del.Count : 0) + (lib != null ? lib.AsInt(0) : 0);
         }
     }
 }

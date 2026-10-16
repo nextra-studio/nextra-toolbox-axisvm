@@ -14,7 +14,7 @@ New-Item -ItemType Directory $temp | Out-Null
 
 $core = Join-Path $repo 'AxisVM plugin\AxisVM plugin'
 $sources = @('Core\AxisModelBuilder.cs', 'Core\AxisModelBuilder.Elements.cs', 'Core\AxisModelBuilder.Surfaces.cs', 'Core\AxisModelBuilder.Loads.cs',
-    'Core\AxisModelBuilder.Helpers.cs', 'Core\AxisModelBuilder.Link.cs', 'Core\LinkFile.cs', 'Core\LinkState.cs', 'Core\RhinoLinkSender.cs', 'Core\SpringParamResolver.cs', 'Core\AttributeParser.cs', 'Core\CatalogResolver.cs',
+    'Core\AxisModelBuilder.Helpers.cs', 'Core\AxisModelBuilder.Link.cs', 'Core\LinkFile.cs', 'Core\LinkState.cs', 'Core\LinkLibrary.cs', 'Core\RhinoLinkSender.cs', 'Core\SpringParamResolver.cs', 'Core\AttributeParser.cs', 'Core\CatalogResolver.cs',
     'Core\CatalogExport.cs', 'Core\Json.cs', 'Core\RhinoModelDto.cs', 'Core\AxisVMHelper.cs', 'Functions\OneWayPanelBuilder.cs',
     'Functions\EdgeChainBuilder.cs') | ForEach-Object { Join-Path $core $_ }
 $exe = Join-Path $temp 'RhinoUpdateLiveChecks.exe'
