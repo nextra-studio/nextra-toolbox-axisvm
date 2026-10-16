@@ -50,4 +50,4 @@ __pycache__/
 *.py[cod]
 Checks/calibration/
 
-Rhino/yak/out/
+yak/out/
