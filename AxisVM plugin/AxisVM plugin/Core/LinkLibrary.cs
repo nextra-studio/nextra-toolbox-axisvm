@@ -47,7 +47,8 @@ namespace AxisVM_plugin.Core
             for (int i = 1; i <= n; i++)
             {
                 string name = CaseName(model, i);
-                if (name.Length > 0) cases.Add(JsonValue.Obj().Set("name", JsonValue.Str(name)).Set("description", JsonValue.Str("")));
+                if (name.Length == 0 || IsUnusedDefaultCase(model, i, name)) continue;
+                cases.Add(JsonValue.Obj().Set("name", JsonValue.Str(name)).Set("description", JsonValue.Str("")));
             }
             lib.Set("loadCases", cases);
             counts[2] = cases.Count;
@@ -75,7 +76,7 @@ namespace AxisVM_plugin.Core
                 HashSet<string> known = Names(rhinoLib == null ? null : rhinoLib[kind]);
                 JsonValue mine = axisvm == null ? null : axisvm[kind];
                 for (int i = 0; mine != null && i < mine.Count; i++)
-                    if (!known.Contains(LinkFile.Get(mine.At(i), "name"))) fresh++;
+                    if (!known.Contains(Squeeze(LinkFile.Get(mine.At(i), "name")))) fresh++;
             }
             return fresh;
         }
@@ -83,8 +84,14 @@ namespace AxisVM_plugin.Core
         private static HashSet<string> Names(JsonValue arr)
         {
             HashSet<string> set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; arr != null && i < arr.Count; i++) set.Add(LinkFile.Get(arr.At(i), "name"));
+            for (int i = 0; arr != null && i < arr.Count; i++) set.Add(Squeeze(LinkFile.Get(arr.At(i), "name")));
             return set;
+        }
+
+        /// <summary>Names differing only in spaces are the same entry ("IPE 300" in AxisVM, "IPE300" in Rhino).</summary>
+        private static string Squeeze(string name)
+        {
+            return (name ?? "").Replace(" ", "").Replace("\t", "");
         }
 
         // ==================================================================
@@ -102,6 +109,27 @@ namespace AxisVM_plugin.Core
             }
             catch { }
             return "Other";
+        }
+
+        /// <summary>
+        /// AxisVM's own "ST1", which every new model starts with: not part of the design when it holds no loads and no
+        /// combination uses it, so it is not offered to Rhino.
+        /// </summary>
+        private static bool IsUnusedDefaultCase(IAxisVMModel model, int index, string name)
+        {
+            if (!string.Equals(name, "ST1", StringComparison.OrdinalIgnoreCase)) return false;
+            try { if (model.LoadCases.get_LoadCount(index) > 0) return false; } catch { return false; }
+            try
+            {
+                for (int c = 1; c <= model.LoadCombinations.Count; c++)
+                {
+                    Array factors, ids;
+                    model.LoadCombinations.GetCombination(c, out factors, out ids);
+                    if (ids != null) foreach (object o in ids) if (Convert.ToInt32(o) == index) return false;
+                }
+            }
+            catch { return false; }
+            return true;
         }
 
         private static string CaseName(IAxisVMModel model, int index)

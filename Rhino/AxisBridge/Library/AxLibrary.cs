@@ -220,6 +220,20 @@ namespace AxisBridge.Library
         public List<string> SectionNames() { return Names(Sections, s => s.Name); }
         public List<string> LoadCaseNames() { return Names(LoadCases, c => c.Name); }
 
+        /// <summary>
+        /// Library names are the same when they differ only in spaces or case: AxisVM spells "IPE 300" and "S 235" where
+        /// the Rhino library has "IPE300" and "S235", and a merge must not add the second spelling.
+        /// </summary>
+        public static bool SameName(string a, string b)
+        {
+            return string.Equals(Squeeze(a), Squeeze(b), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string Squeeze(string s)
+        {
+            return (s ?? "").Replace(" ", "").Replace("\t", "");
+        }
+
         /// <summary>How many entries a merge from AxisVM added.</summary>
         public class MergeResult
         {
@@ -239,7 +253,7 @@ namespace AxisBridge.Library
             foreach (var t in (axisvm["materials"] as Newtonsoft.Json.Linq.JArray) ?? new Newtonsoft.Json.Linq.JArray())
             {
                 var m = t.ToObject<LibMaterial>();
-                if (m == null || string.IsNullOrWhiteSpace(m.Name) || MaterialNames().Exists(x => string.Equals(x, m.Name, StringComparison.OrdinalIgnoreCase))) continue;
+                if (m == null || string.IsNullOrWhiteSpace(m.Name) || MaterialNames().Exists(x => SameName(x, m.Name))) continue;
                 if (string.IsNullOrEmpty(m.Family)) m.Family = GuessFamily(m.Name);
                 Materials.Add(m);
                 res.Materials++;
@@ -247,21 +261,21 @@ namespace AxisBridge.Library
             foreach (var t in (axisvm["sections"] as Newtonsoft.Json.Linq.JArray) ?? new Newtonsoft.Json.Linq.JArray())
             {
                 var s = t.ToObject<LibSection>();
-                if (s == null || string.IsNullOrWhiteSpace(s.Name) || FindSection(s.Name) != null) continue;
+                if (s == null || string.IsNullOrWhiteSpace(s.Name) || Sections.Exists(x => SameName(x.Name, s.Name))) continue;
                 Sections.Add(s);
                 res.Sections++;
             }
             foreach (var t in (axisvm["loadCases"] as Newtonsoft.Json.Linq.JArray) ?? new Newtonsoft.Json.Linq.JArray())
             {
                 var c = t.ToObject<LibLoadCase>();
-                if (c == null || string.IsNullOrWhiteSpace(c.Name) || LoadCaseNames().Exists(x => string.Equals(x, c.Name, StringComparison.OrdinalIgnoreCase))) continue;
+                if (c == null || string.IsNullOrWhiteSpace(c.Name) || LoadCaseNames().Exists(x => SameName(x, c.Name))) continue;
                 LoadCases.Add(c);
                 res.LoadCases++;
             }
             foreach (var t in (axisvm["combinations"] as Newtonsoft.Json.Linq.JArray) ?? new Newtonsoft.Json.Linq.JArray())
             {
                 var c = t.ToObject<LibCombination>();
-                if (c == null || string.IsNullOrWhiteSpace(c.Name) || Combinations.Exists(x => string.Equals(x.Name, c.Name, StringComparison.OrdinalIgnoreCase))) continue;
+                if (c == null || string.IsNullOrWhiteSpace(c.Name) || Combinations.Exists(x => SameName(x.Name, c.Name))) continue;
                 Combinations.Add(c);
                 res.Combinations++;
             }
