@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="15.0">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>EndPinAssignLiveChecks</AssemblyName>
+    <OutputPath>bin\EndPinAssignLiveChecks\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="Interop.AxisVM.FW4">
+      <HintPath>$(AxisVMDir)\Interop.AxisVM.FW4.dll</HintPath>
+      <EmbedInteropTypes>True</EmbedInteropTypes>
+    </Reference>
+    <ProjectReference Include="..\AxisVM plugin\EndPinAssignAddon.csproj">
+      <Project>{B710D6EF-058C-4DBB-9760-0E8576FA579F}</Project>
+      <Name>EndPinAssignAddon</Name>
+    </ProjectReference>
+    <Compile Include="EndPinAssignLiveChecks.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Target Name="CopyAxisRuntime" AfterTargets="Build">
+    <Copy SourceFiles="$(AxisVMDir)\Interop.AxisVM.FW4.dll;$(AxisVMDir)\AxisVMDotNetAddonPluginInterface_v1.0.FW4.dll" DestinationFolder="$(OutputPath)" />
+  </Target>
+</Project>

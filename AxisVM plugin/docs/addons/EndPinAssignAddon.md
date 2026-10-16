@@ -75,6 +75,10 @@ This runs **before** any release is assigned.
   trace in step 4, so a filtered-out end does not reshuffle the chain's direction.
 
 ### 6. Applying Pins (Releases)
+- **Modify intermediate releases** is enabled by default. Before any pin is assigned, both ends of every selected beam/rib are reset to fully fixed (all six components rigid, spring stiffness cleared). Then only the requested chain ends receive the pin, so the result is the same however the lines were released before. Disable the option to keep every existing release (pins stay pins, springs stay springs) and only add or change the requested chain ends.
+- The reset covers the whole selection: intermediate joints, untargeted chain ends, ends excluded by the continuity filter and branched/looped chains. Lines that are not selected are never changed.
+- Torsion is checked after the reset, so a removed torsion hinge does not prevent a requested terminal torsion release. Failed reset writes are reported; any remaining torsion release still prevents adding another.
+- **Display refresh.** AxisVM draws end-release symbols from the structural member, and a line-level release write made from inside AxisVM (the toolbar) does not update the member's copy, so old pins stayed on screen although the model was correct. `Model.Refresh()` and `Windows.ReDraw()` do not fix it. After `EndUpdate()` the add-on therefore copies each touched line's final release at its member's start/end node onto the member (`IAxisVMMember.SetStartReleases` / `SetEndReleases`). Verified in AxisVM X8 on 2026-10-16 with beams that are each their own member; inner ends of a multi-line member are not member ends and are not covered.
 - The chain's "Start" is the first free end of the normalised trace and its "End" is the last.
 - Based on the user's UI choice (`Chain: Both Ends`, `Chain: Start Node Only`, `Chain: End Node Only`), it determines which ends receive the pin.
 - It applies a complete hinge (`yy`, `zz` free, and optionally `xx` torsion free) or a semi-rigid spring with user-defined stiffness to those specific ends.
@@ -96,3 +100,9 @@ Run `dotnet build Checks/EndPinAssignChecks.csproj --no-restore` and then
 logic and dialog and cover node identity, angles, short members, mixed directions, majority
 ordering, branches, loops, release preservation and locale/input handling. They do not exercise
 live AxisVM COM calls or modify an open model.
+
+## Live validation
+
+`Checks/EndPinAssignLiveChecks.csproj` runs the built add-on against a new AxisVM COM instance and a three-beam scratch chain with one reversed beam, intermediate hinges/springs/torsion, and a translational hinge. Build with `dotnet build Checks/EndPinAssignLiveChecks.csproj -c Release`, then run `Checks/bin/EndPinAssignLiveChecks/EndPinAssignLiveChecks.exe` with a scratch output directory argument. It runs unattended: a UI timer sets the production dialog's options, presses OK and closes the summary. Cases: OFF/both ends, ON/both ends with torsion, ON/Start Node Only with torsion, OFF/End Node Only. One `.axs` per case is saved in that directory.
+
+On 2026-10-16, all 24 live checks passed in AxisVM X8. ON reset every selected end to fully fixed (including a translational hinge and an old pin on the untargeted chain end) and pinned only the requested ends, with one torsion release per chain. OFF kept all existing intermediate and untargeted releases after auto-orientation. No structural analysis is performed.

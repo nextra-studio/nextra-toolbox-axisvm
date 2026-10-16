@@ -69,6 +69,9 @@ using AxisVM_plugin.UI;
  *      which of the free ends should receive the pin.
  *    - It applies a complete hinge (yy, zz, and optionally xx torsion) or a semi-rigid spring
  *      to those specific ends, without overwriting existing translational releases.
+ *    - "Modify intermediate releases" (on by default) first resets both ends of every selected
+ *      beam/rib to fully fixed, then pins only the requested chain ends. Off preserves every
+ *      existing release and only adds/changes the requested chain ends.
  * =====================================================================================
  */
 
@@ -133,7 +136,9 @@ namespace AxisVM_plugin.Functions
                     int chainCount = 0;
                     int reorientedLines = 0;
                     int pinnedEnds = 0;
+                    int fixedIntermediateEnds = 0;
 
+                    List<int> linesToProcessForSync = new List<int>();
                     model.BeginUpdate();
                     try
                     {
@@ -161,6 +166,7 @@ namespace AxisVM_plugin.Functions
 
                         // Stable ordering makes majority-vote ties independent of selection order.
                         linesToProcess.Sort();
+                        linesToProcessForSync = linesToProcess;
 
                         if (lines.Count == 0)
                         {
@@ -265,6 +271,37 @@ namespace AxisVM_plugin.Functions
                         // ------------------------------------------------------------------
                         // 6. Apply the releases
                         // ------------------------------------------------------------------
+                        // Modify intermediate: first make BOTH ends of EVERY selected beam/rib fully
+                        // fixed, then pin only the requested chain ends below. Any old pin elsewhere in
+                        // the selection (intermediate joints, untargeted or filtered-out ends, chains
+                        // without a Start/End) is therefore removed. Done before the torsion check so a
+                        // removed torsion hinge does not block a requested terminal torsion release.
+                        if (form.ModifyIntermediateReleases)
+                        {
+                            foreach (int lineId in linesToProcess)
+                            {
+                                var item = model.Lines.Item[lineId];
+                                RReleases start = new RReleases(), end = new RReleases();
+                                if (item.GetStartReleases(ref start) <= 0 || item.GetEndReleases(ref end) <= 0)
+                                {
+                                    warnings.Add("Could not read releases on line " + lineId + "; they were not reset to fixed.");
+                                    continue;
+                                }
+                                if (HasAnyRelease(start))
+                                {
+                                    start = FullyFixed();
+                                    if (item.SetStartReleases(ref start) > 0) fixedIntermediateEnds++;
+                                    else warnings.Add("Could not reset start releases on line " + lineId + " to fixed.");
+                                }
+                                if (HasAnyRelease(end))
+                                {
+                                    end = FullyFixed();
+                                    if (item.SetEndReleases(ref end) > 0) fixedIntermediateEnds++;
+                                    else warnings.Add("Could not reset end releases on line " + lineId + " to fixed.");
+                                }
+                            }
+                        }
+
                         HashSet<int> chainTorsionReleased = new HashSet<int>();
                         // Respect torsion releases already present anywhere in the chain. Repeated runs
                         // must not add a second torsion hinge simply because the target end changed.
@@ -366,8 +403,12 @@ namespace AxisVM_plugin.Functions
                     {
                         model.EndUpdate();
                     }
+                    // AxisVM draws end-release symbols from the structural member, and a line-level
+                    // write made from inside AxisVM does not update the member's copy, so the old
+                    // pins stay on screen. Writing the same releases through the member does.
+                    SyncMemberReleases(model, linesToProcessForSync, warnings);
 
-                    ShowSummary(chainCount, reorientedLines, pinnedEnds, warnings);
+                    ShowSummary(chainCount, reorientedLines, pinnedEnds, fixedIntermediateEnds, warnings);
                 }
             }
             catch (Exception ex)
@@ -379,11 +420,56 @@ namespace AxisVM_plugin.Functions
             return 1;
         }
 
-        private static void ShowSummary(int chainCount, int reorientedLines, int pinnedEnds, List<string> warnings)
+
+        /// <summary>
+        /// Copies each touched line's final release at its member's start/end node onto that member.
+        /// The values are unchanged; the write only makes AxisVM refresh the symbols it draws.
+        /// </summary>
+        private static void SyncMemberReleases(IAxisVMModel model, List<int> lineIds, List<string> warnings)
+        {
+            if (lineIds.Count == 0) return;
+            HashSet<int> touched = new HashSet<int>(lineIds);
+            int failed = 0;
+            for (int m = 1; m <= model.Members.Count; m++)
+            {
+                try
+                {
+                    var member = model.Members.Item[m];
+                    Array memberLines;
+                    if (member.GetLines(out memberLines) <= 0 || memberLines == null) continue;
+                    bool hit = false;
+                    foreach (object o in memberLines) if (touched.Contains(Convert.ToInt32(o))) { hit = true; break; }
+                    if (!hit) continue;
+
+                    RReleases rel;
+                    if (ReleaseAtNode(model, memberLines, member.StartNode, out rel) && member.SetStartReleases(ref rel) <= 0) failed++;
+                    if (ReleaseAtNode(model, memberLines, member.EndNode, out rel) && member.SetEndReleases(ref rel) <= 0) failed++;
+                }
+                catch { failed++; }
+            }
+            if (failed > 0)
+                warnings.Add("The display of " + failed + " member end(s) could not be refreshed; the releases themselves are assigned. Reopen the model to see them.");
+        }
+
+        /// <summary>The release of whichever line of the member ends at <paramref name="nodeId"/>.</summary>
+        private static bool ReleaseAtNode(IAxisVMModel model, Array memberLines, int nodeId, out RReleases rel)
+        {
+            rel = new RReleases();
+            foreach (object o in memberLines)
+            {
+                var line = model.Lines.Item[Convert.ToInt32(o)];
+                if (line.StartNode == nodeId) return line.GetStartReleases(ref rel) > 0;
+                if (line.EndNode == nodeId) return line.GetEndReleases(ref rel) > 0;
+            }
+            return false;
+        }
+
+        private static void ShowSummary(int chainCount, int reorientedLines, int pinnedEnds, int fixedIntermediateEnds, List<string> warnings)
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine(string.Format("Assigned {0} end release(s) across {1} chain(s).", pinnedEnds, chainCount));
             sb.AppendLine(string.Format("Lines re-oriented along their chain: {0}", reorientedLines));
+            sb.AppendLine(string.Format("Line ends reset to fixed before pinning: {0}", fixedIntermediateEnds));
 
             if (warnings.Count > 0)
             {
@@ -395,7 +481,7 @@ namespace AxisVM_plugin.Functions
             }
 
             MessageBox.Show(sb.ToString(), "End Pin Assign", MessageBoxButtons.OK,
-                pinnedEnds > 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                pinnedEnds > 0 || fixedIntermediateEnds > 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         }
 
         // ------------------------------------------------------------------
@@ -778,6 +864,20 @@ namespace AxisVM_plugin.Functions
         // ------------------------------------------------------------------
         // Geometry
         // ------------------------------------------------------------------
+
+        private static bool HasAnyRelease(RReleases rel)
+        {
+            return rel.x.ReleaseType != EReleaseType.rtRigid || rel.y.ReleaseType != EReleaseType.rtRigid ||
+                rel.z.ReleaseType != EReleaseType.rtRigid || rel.xx.ReleaseType != EReleaseType.rtRigid ||
+                rel.yy.ReleaseType != EReleaseType.rtRigid || rel.zz.ReleaseType != EReleaseType.rtRigid;
+        }
+
+        /// <summary>All six components rigid - a fully fixed line end.</summary>
+        private static RReleases FullyFixed()
+        {
+            RRelease rigid = new RRelease { ReleaseType = EReleaseType.rtRigid };
+            return new RReleases { x = rigid, y = rigid, z = rigid, xx = rigid, yy = rigid, zz = rigid };
+        }
 
         private static RReleases ModifyRelease(RReleases rel, EndPinAssignForm form, bool applyTorsion)
         {

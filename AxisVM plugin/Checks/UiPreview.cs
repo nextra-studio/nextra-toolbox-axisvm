@@ -73,6 +73,8 @@ internal static class UiPreview
                 {
                     ((ComboBox)form.GetType().GetField("cmbPinType", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(form)).SelectedIndex = 0;
                     Save(form, name + "-complete-pin");
+                    ((CheckBox)form.GetType().GetField("chkModifyIntermediate", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(form)).Checked = false;
+                    Save(form, name + "-preserve-intermediate");
                 }
                 if (type == "ReactionTransferForm")
                 {

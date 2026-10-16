@@ -120,6 +120,15 @@ internal static class EndPinAssignChecks
 
             using (var form = new EndPinAssignForm())
             {
+                var intermediate = (System.Windows.Forms.CheckBox)typeof(EndPinAssignForm)
+                    .GetField("chkModifyIntermediate", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(form);
+                Check(intermediate.Checked, "intermediate modification enabled by default");
+                var accept = typeof(EndPinAssignForm).GetMethod("BtnOk_Click", BindingFlags.NonPublic | BindingFlags.Instance);
+                accept.Invoke(form, new object[] { null, EventArgs.Empty });
+                Check(form.ModifyIntermediateReleases, "enabled intermediate option passed to logic");
+                intermediate.Checked = false;
+                accept.Invoke(form, new object[] { null, EventArgs.Empty });
+                Check(!form.ModifyIntermediateReleases, "preserve intermediate option passed to logic");
                 Setting(form, "IsSemiRigid", false);
                 var existing = new RReleases
                 {
@@ -140,6 +149,12 @@ internal static class EndPinAssignChecks
                     "semi-rigid stiffness assigned to requested rotations");
                 changed = (RReleases)Call("ModifyRelease", existing, form, false);
                 Check(changed.xx.Init == 23, "semi-rigid pin preserves other torsion");
+                RReleases fixedJoint = (RReleases)Call("FullyFixed");
+                Check(!(bool)Call("HasAnyRelease", fixedJoint), "reset end is fully fixed");
+                Check(fixedJoint.xx.Init == 0 && fixedJoint.yy.Init == 0 && fixedJoint.zz.Init == 0,
+                    "reset clears spring stiffness");
+                Check((bool)Call("HasAnyRelease", changed) && (bool)Call("HasAnyRelease", existing),
+                    "pinned and translation-released ends need a reset write");
             }
 
             CultureInfo previous = CultureInfo.CurrentCulture;

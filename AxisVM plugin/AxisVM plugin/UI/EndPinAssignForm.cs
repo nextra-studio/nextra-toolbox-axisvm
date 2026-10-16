@@ -16,6 +16,7 @@ namespace AxisVM_plugin.UI
         public bool ReleaseTorsion { get; private set; }
         public bool CheckModelContinuity { get; private set; }
         public bool AutoOrient { get; private set; }
+        public bool ModifyIntermediateReleases { get; private set; }
         public bool IsSemiRigid { get; private set; }
         public double Stiffness { get; private set; }
         public PinTarget Target { get; private set; }
@@ -24,6 +25,7 @@ namespace AxisVM_plugin.UI
         private CheckBox chkReleaseTorsion;
         private CheckBox chkModelContinuity;
         private CheckBox chkAutoOrient;
+        private CheckBox chkModifyIntermediate;
         private ComboBox cmbPinType;
         private ComboBox cmbPinTarget;
         private TextBox txtAngleTolerance;
@@ -44,7 +46,7 @@ namespace AxisVM_plugin.UI
             this.Text = "End Pin Assign Settings";
             // ClientSize, not Size: Size includes the caption bar and border, so sizing by it left the
             // OK/Cancel row hanging below the bottom edge of the dialog.
-            this.ClientSize = new Size(470, 352);
+            this.ClientSize = new Size(500, 430);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
@@ -73,10 +75,31 @@ namespace AxisVM_plugin.UI
             chkAutoOrient.Checked = true;
             this.Controls.Add(chkAutoOrient);
 
+            chkModifyIntermediate = new CheckBox();
+            chkModifyIntermediate.Text = "Modify intermediate releases (reset selection to fixed first)";
+            chkModifyIntermediate.Location = new Point(20, 100);
+            chkModifyIntermediate.AutoSize = true;
+            chkModifyIntermediate.Checked = true;
+            this.Controls.Add(chkModifyIntermediate);
+
+            Label lblIntermediateNote = new Label();
+            lblIntermediateNote.Location = new Point(40, 126);
+            lblIntermediateNote.Size = new Size(435, 40);
+            lblIntermediateNote.ForeColor = SystemColors.GrayText;
+            Action updateIntermediateNote = delegate
+            {
+                lblIntermediateNote.Text = chkModifyIntermediate.Checked
+                    ? "All selected beams/ribs are first made fully fixed at both ends. Then only the chain ends chosen below receive the pin."
+                    : "Existing releases are kept (pins stay pins). Only the chain ends chosen below are added or changed.";
+            };
+            chkModifyIntermediate.CheckedChanged += delegate { updateIntermediateNote(); };
+            updateIntermediateNote();
+            this.Controls.Add(lblIntermediateNote);
+
             // Pin Type Label & ComboBox
             Label lblPinType = new Label();
             lblPinType.Text = "Pin Type:";
-            lblPinType.Location = new Point(20, 100);
+            lblPinType.Location = new Point(20, 180);
             lblPinType.AutoSize = true;
             this.Controls.Add(lblPinType);
 
@@ -84,7 +107,7 @@ namespace AxisVM_plugin.UI
             cmbPinType.DropDownStyle = ComboBoxStyle.DropDownList;
             cmbPinType.Items.AddRange(new string[] { "Complete Pin", "Semi-rigid Pin" });
             cmbPinType.SelectedIndex = 1;
-            cmbPinType.Location = new Point(185, 97);
+            cmbPinType.Location = new Point(185, 177);
             cmbPinType.Size = new Size(260, 24);
             cmbPinType.SelectedIndexChanged += CmbPinType_SelectedIndexChanged;
             this.Controls.Add(cmbPinType);
@@ -92,7 +115,7 @@ namespace AxisVM_plugin.UI
             // Pin Target Label & ComboBox
             Label lblPinTarget = new Label();
             lblPinTarget.Text = "Apply To:";
-            lblPinTarget.Location = new Point(20, 140);
+            lblPinTarget.Location = new Point(20, 220);
             lblPinTarget.AutoSize = true;
             this.Controls.Add(lblPinTarget);
 
@@ -104,7 +127,7 @@ namespace AxisVM_plugin.UI
                 "Chain: End Node Only"
             });
             cmbPinTarget.SelectedIndex = 0;
-            cmbPinTarget.Location = new Point(185, 137);
+            cmbPinTarget.Location = new Point(185, 217);
             cmbPinTarget.Size = new Size(260, 24);
             cmbPinTarget.SelectedIndexChanged += CmbPinTarget_SelectedIndexChanged;
             this.Controls.Add(cmbPinTarget);
@@ -112,27 +135,27 @@ namespace AxisVM_plugin.UI
             // Angle Tolerance Label & TextBox
             lblAngleTolerance = new Label();
             lblAngleTolerance.Text = "Angle Tol (deg):";
-            lblAngleTolerance.Location = new Point(20, 180);
+            lblAngleTolerance.Location = new Point(20, 260);
             lblAngleTolerance.AutoSize = true;
             this.Controls.Add(lblAngleTolerance);
 
             txtAngleTolerance = new TextBox();
             txtAngleTolerance.Text = "15.0";
-            txtAngleTolerance.Location = new Point(205, 177);
+            txtAngleTolerance.Location = new Point(205, 257);
             txtAngleTolerance.Size = new Size(120, 20);
             this.Controls.Add(txtAngleTolerance);
 
             // Stiffness Label & TextBox
             lblStiffness = new Label();
             lblStiffness.Text = "Stiffness (kNm/rad):";
-            lblStiffness.Location = new Point(20, 220);
+            lblStiffness.Location = new Point(20, 300);
             lblStiffness.AutoSize = true;
             lblStiffness.Visible = false;
             this.Controls.Add(lblStiffness);
 
             txtStiffness = new TextBox();
             txtStiffness.Text = "1.0";
-            txtStiffness.Location = new Point(205, 217);
+            txtStiffness.Location = new Point(205, 297);
             txtStiffness.Size = new Size(120, 20);
             txtStiffness.Visible = false;
             this.Controls.Add(txtStiffness);
@@ -140,8 +163,8 @@ namespace AxisVM_plugin.UI
             // Direction note - explains what unchecking auto-orient costs.
             Label lblDirectionNote = new Label();
             lblDirectionNote.Text = "Auto-orient re-aligns the local x of the selected beams/ribs along their chain. Unchecked, local axes are preserved; releases are still assigned.";
-            lblDirectionNote.Location = new Point(20, 246);
-            lblDirectionNote.Size = new Size(425, 60);
+            lblDirectionNote.Location = new Point(20, 338);
+            lblDirectionNote.Size = new Size(455, 60);
             lblDirectionNote.ForeColor = SystemColors.GrayText;
             this.Controls.Add(lblDirectionNote);
 
@@ -201,6 +224,7 @@ namespace AxisVM_plugin.UI
             ReleaseTorsion = chkReleaseTorsion.Checked;
             CheckModelContinuity = chkModelContinuity.Checked;
             AutoOrient = chkAutoOrient.Checked;
+            ModifyIntermediateReleases = chkModifyIntermediate.Checked;
             IsSemiRigid = cmbPinType.SelectedIndex == 1;
             Target = (PinTarget)cmbPinTarget.SelectedIndex;
 
