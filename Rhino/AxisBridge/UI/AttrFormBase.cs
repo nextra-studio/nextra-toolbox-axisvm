@@ -277,7 +277,8 @@ namespace AxisBridge.UI
         /// <summary>Default for a length in document units given in metres (e.g. 0.2 m -> 200 in a mm model).</summary>
         protected string DocLength(double metres)
         {
-            double scale = RhinoMath.UnitScale(UnitSystem.Meters, Doc != null ? Doc.ModelUnitSystem : UnitSystem.Millimeters);
+            // No document (offline preview): assume a millimetre model without calling into Rhino.
+            double scale = Doc != null ? RhinoMath.UnitScale(UnitSystem.Meters, Doc.ModelUnitSystem) : 1000.0;
             return (metres * scale).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
         }
 

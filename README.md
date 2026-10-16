@@ -2,7 +2,7 @@
 
 AxisVM X8 add-ons for model preparation and result extraction, plus the companion Rhino 8 plug-in **Nextra-AxisRhinoImport**. Each tool has its own icon, dialog and illustrated guide. The toolbox keeps growing: new tools are added to one list ([tools.json](tools.json)) and then appear in the installer, the download ZIP and these docs.
 
-**[Install](#install)** | **[Download ZIP](https://github.com/nextra-studio/nextra-toolbox-axisvm/releases/latest/download/nextra-axisvm-toolbox.zip)** | [Illustrated user guide](AxisVM%20plugin/docs/user-guide/README.md) | [Add a tool](AxisVM%20plugin/docs/ADDING-A-TOOL.md) | [Build from source](AxisVM%20plugin/docs/HOW-TO-BUILD.md)
+**[Install](#install)** | **[Download ZIP](https://github.com/nextra-studio/nextra-toolbox-axisvm/releases/latest/download/nextra-axisvm-toolbox.zip)** | [Illustrated user guide](AxisVM%20plugin/docs/user-guide/README.md) | [Rhino commands](AxisVM%20plugin/docs/user-guide/rhino-commands.md) | [Add a tool](AxisVM%20plugin/docs/ADDING-A-TOOL.md) | [Build from source](AxisVM%20plugin/docs/HOW-TO-BUILD.md)
 
 ## Tools
 
@@ -119,7 +119,7 @@ Use the `Rhino` folder from the ZIP (`AxisBridge.rhp` and `Newtonsoft.Json.dll` 
 
 </details>
 
-Type `Ax` in Rhino's command line to list `AxPoint`, `AxLine`, `AxDomain`, `AxLibrary`, `AxExport` and the other commands.
+Type `Ax` in Rhino's command line to list `AxPoint`, `AxLine`, `AxDomain`, `AxLibrary`, `AxExport` and the other commands. **[Rhino command guide with screenshots](AxisVM%20plugin/docs/user-guide/rhino-commands.md)**.
 
 ### Try it
 

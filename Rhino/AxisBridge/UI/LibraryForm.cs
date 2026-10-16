@@ -159,7 +159,8 @@ namespace AxisBridge.UI
 
             var hint = Theme.Hint(help);
             hint.Dock = DockStyle.Bottom;
-            hint.MaximumSize = new Size(0, 0);
+            hint.AutoSize = false;   // fixed height so the text wraps to the dialog width instead of being cut off
+            hint.Height = 40;
             hint.Padding = new Padding(0, 4, 0, 0);
 
             page.Controls.Add(grid);

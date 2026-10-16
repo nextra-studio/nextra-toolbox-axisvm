@@ -11,6 +11,8 @@
 3. Check the file summary, length/load units and node merge tolerance. Leave crossing-line connection enabled when it suits the geometry.
 4. Use Dry run first to inspect attribute problems without writing to the model. Then run Import and review the complete report.
 
+See the [Rhino commands guide](rhino-commands.md) for every Ax command with screenshots.
+
 ## Dialog
 
 ![Rhino import dialog with example data](../images/RhinoImportForm.png)

@@ -1,5 +1,5 @@
 name: Nextra-AxisRhinoImport
-version: 1.0.0
+version: 1.0.1
 authors:
 - Tatsuki
 description: Rhino 8 companion of the Nextra AxisVM toolbox. Classify geometry with AxPoint, AxLine and AxDomain, manage materials, sections and load cases with AxLibrary, and export a JSON model with AxExport for the Rhino Import add-on in AxisVM.

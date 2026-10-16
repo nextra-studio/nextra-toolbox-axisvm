@@ -207,4 +207,38 @@ body += '<text class="s" x="372" y="108">Select objects in AxisVM first,</text><
 body += '<text class="s" x="372" y="164">Not visible? Check the DLL is in the</text><text class="s" x="372" y="184">AddOns folder and restart AxisVM.</text>'
 svg("axisvm-tools.svg", 720, h, body.replace("Seven tools", "%d tools" % rows))
 
-print("Wrote", len(list(OUT.glob("*.svg"))), "pictures to", OUT)
+# Rhino pictures (written to docs/images/rhino/) -----------------------------------------------------------
+OUT = OUT.parent / "rhino"
+cmds = ["AxPoint", "AxLine", "AxDomain", "AxLibrary", "AxEdgeHinge", "AxVisualize", "AxClear", "AxUpdateGuid", "AxLayerTidyUp", "AxExport"]
+body = window(20, 16, 680, 60 + 22 * len(cmds) + 52, "Rhino 8")
+body += '<rect class="term" x="34" y="52" width="652" height="30" rx="6"/>'
+body += '<text class="tt" x="46" y="72">Command: </text><text class="tg" x="112" y="72">Ax</text>'
+body += badge(676, 50, 1)
+body += '<rect class="f" x="104" y="88" width="190" height="%d" rx="6"/>' % (22 * len(cmds) + 8)
+for i, c in enumerate(cmds):
+    y = 106 + i * 22
+    if c == "AxPoint":
+        body += '<rect class="sel" x="106" y="%d" width="186" height="22" rx="4"/>' % (y - 16)
+    body += '<text class="m" x="116" y="%d">%s</text>' % (y, c)
+body += badge(300, 94, 2)
+body += '<text class="t" x="330" y="120">Type Ax in the command line.</text>'
+body += '<text class="s" x="330" y="144">Rhino lists every AxisBridge command;</text>'
+body += '<text class="s" x="330" y="164">keep typing, then press Enter or Space.</text>'
+body += '<text class="s" x="330" y="196">Select objects first, or run the command</text>'
+body += '<text class="s" x="330" y="216">and select afterwards - both work.</text>'
+svg("commandline.svg", 720, 60 + 22 * len(cmds) + 76, body)
+
+steps = [("1", "Classify", "AxPoint  AxLine", "AxDomain"), ("2", "Check", "AxVisualize", "AxLayerTidyUp"), ("3", "Export", "AxExport", "saves a .json"), ("4", "Import", "AxisVM:", "N. Rhino Import")]
+body = '<text class="h" x="360" y="38" text-anchor="middle">Rhino to AxisVM</text>'
+for i, (n, t, a, b) in enumerate(steps):
+    x = 20 + i * 176
+    body += '<rect class="card" x="%d" y="60" width="156" height="130" rx="12"/>' % x
+    body += '<circle class="blue" cx="%d" cy="88" r="15"/><text class="bn" x="%d" y="93" text-anchor="middle" style="font-size:14px">%s</text>' % (x + 30, x + 30, n)
+    body += '<text class="t" x="%d" y="94">%s</text>' % (x + 54, t)
+    body += '<text class="m" x="%d" y="136">%s</text><text class="m" x="%d" y="158">%s</text>' % (x + 16, esc(a), x + 16, esc(b))
+    if i < 3:
+        body += arrow(x + 158, 125, x + 172, 125)
+body += '<text class="s" x="360" y="222" text-anchor="middle">Set up materials, sections and load cases once with AxLibrary.</text>'
+svg("workflow.svg", 720, 242, body)
+
+print("Wrote install and Rhino pictures under", OUT.parent)

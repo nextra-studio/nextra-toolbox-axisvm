@@ -2,7 +2,7 @@
 
 Choose a tool by the task you want to perform. Select objects in AxisVM before opening its dialog.
 
-[Install the toolbox](../INSTALLATION.md) | [Add a tool](../ADDING-A-TOOL.md) | [Build from source](../HOW-TO-BUILD.md)
+[Install the toolbox](../INSTALLATION.md) | [Rhino commands](rhino-commands.md) | [Add a tool](../ADDING-A-TOOL.md) | [Build from source](../HOW-TO-BUILD.md)
 
 <!-- gen:tools-guide -->
 | | Tool | Use it for |

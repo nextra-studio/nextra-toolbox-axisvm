@@ -101,6 +101,7 @@ namespace AxisBridge.UI
                 EditMode = DataGridViewEditMode.EditOnEnter,
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize
             };
+            Theme.StyleGrid(grid);
             grid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.True;
             grid.DefaultCellStyle.Font = Theme.Body;
 
