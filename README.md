@@ -2,7 +2,7 @@
 
 AxisVM X8 add-ons for model preparation and result extraction, plus the companion Rhino 8 plug-in **Nextra-AxisRhinoImport**. Each tool has its own icon, dialog and illustrated guide. The toolbox keeps growing: new tools are added to one list ([tools.json](tools.json)) and then appear in the installer, the download ZIP and these docs.
 
-**[Install](#install)** | **[Download ZIP](https://github.com/nextra-studio/nextra-toolbox-axisvm/releases/latest/download/nextra-axisvm-toolbox.zip)** | [Illustrated user guide](AxisVM%20plugin/docs/user-guide/README.md) | [Rhino commands](AxisVM%20plugin/docs/user-guide/rhino-commands.md) | [Add a tool](AxisVM%20plugin/docs/ADDING-A-TOOL.md) | [Build from source](AxisVM%20plugin/docs/HOW-TO-BUILD.md)
+**[Install (about 3 minutes)](#install)** | **[Download ZIP](https://github.com/nextra-studio/nextra-toolbox-axisvm/releases/latest/download/nextra-axisvm-toolbox.zip)** | [Illustrated user guide](AxisVM%20plugin/docs/user-guide/README.md) | [Rhino commands](AxisVM%20plugin/docs/user-guide/rhino-commands.md) | [Add a tool](AxisVM%20plugin/docs/ADDING-A-TOOL.md) | [Build from source](AxisVM%20plugin/docs/HOW-TO-BUILD.md)
 
 ## Tools
 
@@ -21,6 +21,8 @@ AxisVM X8 add-ons for model preparation and result extraction, plus the companio
 A tool that is still being developed carries **(WIP)** in its AxisVM menu text and in this table. New tools start as WIP until they are validated; all current tools are released.
 
 ## Install
+
+**About 3 minutes, no hassle:** download one ZIP, double-click `Install-Addons.bat`, install the Rhino plug-in from PackageManager.
 
 **Windows | AxisVM X8 | Rhino 8.6 or newer for the Rhino plug-in.**
 
