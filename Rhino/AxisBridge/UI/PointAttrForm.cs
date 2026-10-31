@@ -9,12 +9,13 @@ using Rhino;
 
 namespace AxisBridge.UI
 {
-    /// <summary>AxPoint dialog: nodal support, nodal loads (one row per load / load case) and parts.</summary>
+    /// <summary>AxPoint dialog: simple point, nodal support, nodal loads (one row per load / load case) and parts.</summary>
     public class PointAttrForm : AttrFormBase
     {
-        public static readonly string[] ScalarKeys = { AxKeys.Support, AxKeys.Parts };
+        public static readonly string[] ScalarKeys = { AxKeys.Type, AxKeys.Support, AxKeys.Parts };
         public static readonly string[] FamilyKeys = { AxKeys.NodalLoad };
 
+        private readonly ComboField pointType;
         private readonly SupportField support;
         private readonly TextField parts;
 
@@ -26,6 +27,14 @@ namespace AxisBridge.UI
             TypeStrip.Visible = false;
 
             var sup = new FieldPage();
+            sup.Section("Point");
+            pointType = Track(new ComboField(AxKeys.Type, false));
+            pointType.SetItems(new[]
+            {
+                new KeyValuePair<string, string>("Exported when it has a support, load or part", ""),
+                new KeyValuePair<string, string>("Simple point (always a node)", AxSchema.Simple)
+            });
+            sup.Add("Type", pointType.Control, "Simple point: an AxisVM node with nothing on it, e.g. to split a line or to fix a mesh node.");
             sup.Section("Nodal support");
             support = Track(new SupportField(false));
             sup.Add("Support", support.Control, "A point becomes an AxisVM node. A point lying on a member is connected to it automatically on import.");
@@ -38,6 +47,7 @@ namespace AxisBridge.UI
                 "One row per load in global directions - add a row per load case (Duplicate moves to the next case).");
             AddPage("Loads", grid);
 
+            pointType.Load(State.Get(AxKeys.Type), "", false);
             support.Load(State.Get(AxKeys.Support), "", false);
             parts.Load(State.Get(AxKeys.Parts), "", false);
         }

@@ -79,7 +79,8 @@ namespace AxisBridge.Attributes
                 { OneWayLoadPanel, Set(AxKeys.FeType, AxKeys.SpanDirection, AxKeys.EdgeSpacing, AxKeys.SpanTolerance, AxKeys.PointLoad, AxKeys.DistLoad) },
             };
 
-        private static readonly HashSet<string> PointKeys = Set(AxKeys.Support, AxKeys.NodalLoad, AxKeys.Parts);
+        // Ax_Type=Simple on a point: a plain node, exported without a support or a load (as a Simple line is a plain line).
+        private static readonly HashSet<string> PointKeys = Set(AxKeys.Type, AxKeys.Support, AxKeys.NodalLoad, AxKeys.Parts);
 
         private static HashSet<string> Set(params string[] keys)
         {

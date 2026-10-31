@@ -338,7 +338,7 @@ namespace AxisVM_plugin.Core
                 foreach (string key in e.Attrs.Keys)
                 {
                     if (!key.StartsWith(AxKeys.Prefix, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (AxKeys.IsKnown(key)) continue;
+                    if (AxKeys.IsKnown(key) || key.Equals("Ax_NxWritten", StringComparison.OrdinalIgnoreCase)) continue;   // Nextra's own record of what it wrote
                     if (!reported.Add(key)) continue;
 
                     notes.Add(string.Format("Attribute '{0}' is not one this addon knows and was ignored. Check it for a typo.", key));
