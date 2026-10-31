@@ -202,7 +202,7 @@ namespace AxisVM_plugin.Core
     public class RhinoLibSection
     {
         public string Name = "";
-        /// <summary>Catalog, Rectangle, Circle, Pipe, RectHollow.</summary>
+        /// <summary>Catalog, Rectangle, Circle, Pipe, RectHollow, Polygon.</summary>
         public string Shape = "Catalog";
         /// <summary>Dimensions in millimetres: B width, H height/diameter, T wall thickness.</summary>
         public double B, H, T;
@@ -215,6 +215,20 @@ namespace AxisVM_plugin.Core
         public string CatalogFile = "";
         /// <summary>The catalog's own spelling when it differs from Name (a few tables pad names with spaces).</summary>
         public string CatalogName = "";
+        /// <summary>Polygon: the outline and openings in millimetres (local y, local z); B and H are then a rectangle of the same A and Iy, used when AxisVM refuses the outline.</summary>
+        public List<double[]> Outer = new List<double[]>();
+        public List<List<double[]>> Holes = new List<List<double[]>>();
+    }
+
+    /// <summary>A material the Rhino side defines by its values because the AxisVM catalog does not have it. Stresses and moduli in kN/m2, density in kg/m3; 0 = not given.</summary>
+    public class RhinoLibMaterial
+    {
+        public string Name = "";
+        /// <summary>timber, steel, concrete or other (stiffness only).</summary>
+        public string Type = "other";
+        /// <summary>ETimberType without "tt": Hardwood, GLULAM, LVL, SoftWood, Other, CLT.</summary>
+        public string TimberType = "";
+        public double Ex, Ey, Nu, Rho, G, E005, Fmk, Ft0k, Ft90k, Fc0k, Fc90k, Fvk, GammaM, Fy, Fu, Fck;
     }
 
     /// <summary>A load combination of the Rhino library: its AxisVM type ("ULS", "SLSChar", ...) and "factor x load case" terms.</summary>
@@ -228,9 +242,18 @@ namespace AxisVM_plugin.Core
     public class RhinoLibrary
     {
         public List<string> Materials = new List<string>();
+        public List<RhinoLibMaterial> CustomMaterials = new List<RhinoLibMaterial>();
         public List<RhinoLibSection> Sections = new List<RhinoLibSection>();
         public List<string> LoadCases = new List<string>();
         public List<RhinoLibCombination> Combinations = new List<RhinoLibCombination>();
+
+        public RhinoLibMaterial FindMaterial(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            foreach (RhinoLibMaterial m in CustomMaterials)
+                if (string.Equals(m.Name, name.Trim(), StringComparison.OrdinalIgnoreCase)) return m;
+            return null;
+        }
 
         public RhinoLibSection FindSection(string name)
         {
@@ -439,6 +462,16 @@ namespace AxisVM_plugin.Core
             }
         }
 
+        private static void ReadRing(JsonValue a, List<double[]> into)
+        {
+            if (a == null || a.Type != JsonValue.JsonType.Array) return;
+            for (int i = 0; i < a.Count; i++)
+            {
+                JsonValue p = a.At(i);
+                if (p != null && p.Type == JsonValue.JsonType.Array && p.Count >= 2) into.Add(new[] { p.At(0).AsDouble(0), p.At(1).AsDouble(0) });
+            }
+        }
+
         private static void ReadLibrary(JsonValue lib, RhinoModel m)
         {
             if (lib == null || lib.Type != JsonValue.JsonType.Object) return;
@@ -449,6 +482,17 @@ namespace AxisVM_plugin.Core
                 {
                     string n = Get(mats.At(i), "name", "").Trim();
                     if (n.Length > 0) m.Library.Materials.Add(n);
+                    JsonValue c = mats.At(i).Type == JsonValue.JsonType.Object ? mats.At(i)["custom"] : null;
+                    if (n.Length > 0 && c != null && c.Type == JsonValue.JsonType.Object)
+                    {
+                        Func<string, double> d = k => c[k] != null ? c[k].AsDouble(0) : 0;
+                        m.Library.CustomMaterials.Add(new RhinoLibMaterial
+                        {
+                            Name = n, Type = Get(c, "type", "other"), TimberType = Get(c, "timberType", ""), Ex = d("ex"), Ey = d("ey"), Nu = d("nu"), Rho = d("rho"), G = d("g"),
+                            E005 = d("e005"), Fmk = d("fmk"), Ft0k = d("ft0k"), Ft90k = d("ft90k"), Fc0k = d("fc0k"), Fc90k = d("fc90k"), Fvk = d("fvk"), GammaM = d("gammaM"),
+                            Fy = d("fy"), Fu = d("fu"), Fck = d("fck")
+                        });
+                    }
                 }
 
             JsonValue secs = lib["sections"];
@@ -468,6 +512,15 @@ namespace AxisVM_plugin.Core
                         CatalogFile = Get(s, "catalogFile", "").Trim(),
                         CatalogName = Get(s, "catalogName", "")   // not trimmed: the padding is part of the catalog name
                     };
+                    ReadRing(s["outer"], sec.Outer);
+                    JsonValue holes = s["holes"];
+                    if (holes != null && holes.Type == JsonValue.JsonType.Array)
+                        for (int k = 0; k < holes.Count; k++)
+                        {
+                            List<double[]> h = new List<double[]>();
+                            ReadRing(holes.At(k), h);
+                            if (h.Count >= 3) sec.Holes.Add(h);
+                        }
                     if (sec.Name.Length > 0) m.Library.Sections.Add(sec);
                 }
 

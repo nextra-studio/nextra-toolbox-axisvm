@@ -131,7 +131,7 @@ namespace AxisVM_plugin.Core
             this.rhino = rhino;
             this.opt = opt;
             this.notes = notes;
-            this.catalog = new CatalogResolver(model, notes, rhino.Library);
+            this.catalog = new CatalogResolver(model, notes, rhino.Library) { App = app };
             this.springs = new SpringParamResolver(model, notes);
             this.nodes = new NodeIndex(opt.MergeToleranceM);
         }

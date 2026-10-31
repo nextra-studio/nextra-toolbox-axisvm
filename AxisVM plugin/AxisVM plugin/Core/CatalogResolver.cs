@@ -24,6 +24,9 @@ namespace AxisVM_plugin.Core
         private readonly List<string> notes;
         private readonly RhinoLibrary library;
 
+        /// <summary>Needed to build outlines (ObjectCreator); without it a library polygon falls back to its equivalent rectangle.</summary>
+        public IAxisVMApplication App;
+
         private readonly Dictionary<string, int> materials = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> sections = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> loadCases = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -120,6 +123,14 @@ namespace AxisVM_plugin.Core
             {
                 id = FindMaterialInModel(key);
 
+                // A material the Rhino library defines wins over the catalog and over an earlier import of the same name.
+                RhinoLibMaterial custom = library.FindMaterial(key);
+                if (custom != null && custom.Ex > 0)
+                {
+                    if (id > 0) UpdateLibraryMaterial(id, custom);
+                    else id = CreateLibraryMaterial(custom);
+                }
+
                 if (id <= 0)
                 {
                     foreach (string candidate in NameVariants(key))
@@ -149,6 +160,71 @@ namespace AxisVM_plugin.Core
 
             materials[key] = id;
             return id;
+        }
+
+        /// <summary>A material the Rhino library defines by its values. Units kN/m2, kg/m3.</summary>
+        private int CreateLibraryMaterial(RhinoLibMaterial m)
+        {
+            double ex = m.Ex, ey = m.Ey > 0 ? m.Ey : m.Ex, nu = m.Nu > 0 ? m.Nu : 0.2;
+            string type = (m.Type ?? "").Trim().ToLowerInvariant();
+            int id = 0;
+            try
+            {
+                if (type == "steel" && m.Fy > 0 && m.Fu > 0)
+                    id = model.Materials.AddSteel_EuroCode("EuroCode", "Steel", m.Name, 0xFF8FA3B5, 0xFF000000, ex, ex, ex, nu, nu, nu, 1.2E-5, 1.2E-5, 1.2E-5, m.Rho, m.Fy, m.Fu, m.Fy, m.Fu);
+                else if (type == "concrete" && m.Fck > 0)
+                    id = model.Materials.AddConcrete_EuroCode("EuroCode", "Concrete", m.Name, 0xFFBDBDBD, 0xFF000000, ex, ex, ex, nu, nu, nu, 1E-5, 1E-5, 1E-5, m.Rho, m.Fck, 1.5, 1.0, 2.0);
+                else
+                {
+                    id = model.Materials.AddTimber(ENationalDesignCode.ndcEuroCode, "EuroCode", "Timber", m.Name, 0xFFD2B48C, 0xFF000000, ex, ey, ey, nu, nu, nu, 5E-6, 5E-6, 5E-6, m.Rho);
+                    if (id > 0) SetTimberValues(model.Materials.Item[id], m);
+                }
+            }
+            catch (Exception ex2)
+            {
+                notes.Add(string.Format("Material '{0}' could not be created ({1}).", m.Name, ex2.Message));
+                return 0;
+            }
+
+            if (id > 0) notes.Add(string.Format("Material '{0}' was created from the Rhino library ({1}).", m.Name, type));
+            else notes.Add(string.Format("AxisVM rejected the library material '{0}' (code {1}).", m.Name, id));
+            return id;
+        }
+
+        /// <summary>The model already has this material (an earlier import): it takes the library's current values.</summary>
+        private void UpdateLibraryMaterial(int id, RhinoLibMaterial m)
+        {
+            try
+            {
+                IAxisVMMaterial x = model.Materials.Item[id];
+                double ey = m.Ey > 0 ? m.Ey : m.Ex, nu = m.Nu > 0 ? m.Nu : 0.2;
+                x.ex = m.Ex; x.ey = ey; x.ez = ey; x.Nux = nu; x.nuy = nu; x.nuz = nu; x.Rho = m.Rho;
+                string type = (m.Type ?? "").Trim().ToLowerInvariant();
+                if (type == "steel" && m.Fy > 0 && m.Fu > 0) { x.Fy = m.Fy; x.Fu = m.Fu; x.Fy40 = m.Fy; x.Fu40 = m.Fu; }
+                else if (type == "concrete" && m.Fck > 0) x.Fck = m.Fck;
+                else SetTimberValues(x, m);
+                notes.Add(string.Format("Material '{0}' was updated from the Rhino library.", m.Name));
+            }
+            catch (Exception e) { notes.Add(string.Format("Material '{0}' could not be updated ({1}): the model keeps its values.", m.Name, e.Message)); }
+        }
+
+        private void SetTimberValues(IAxisVMMaterial x, RhinoLibMaterial m)
+        {
+            Action<double, Action<double>> put = (v, set) => { if (v > 0) { try { set(v); } catch (Exception e) { notes.Add(string.Format("Material '{0}': a timber value could not be set ({1}).", m.Name, e.Message)); } } };
+            put(m.G, v => x.Gmean = v);
+            put(m.E005, v => x.E005 = v);
+            put(m.Fmk, v => x.fmk = v);
+            put(m.Ft0k, v => x.ft0k = v);
+            put(m.Ft90k, v => x.ft90k = v);
+            put(m.Fc0k, v => x.fc0k = v);
+            put(m.Fc90k, v => { x.fc90ky = v; x.fc90kz = v; });
+            put(m.Fvk, v => { x.fvky = v; x.fvkz = v; });
+            put(m.GammaM, v => x.GammaM = v);
+            ETimberType t;
+            if (!string.IsNullOrEmpty(m.TimberType) && Enum.TryParse<ETimberType>("tt" + m.TimberType, true, out t))
+            {
+                try { x.TimberType = t; } catch { }
+            }
         }
 
         private int FindMaterialInModel(string name)
@@ -232,6 +308,20 @@ namespace AxisVM_plugin.Core
                 // A profile picked from the catalog is matched by its exact name: AxisVM has entries that
                 // differ only in spacing ("IPE 80" / "IPE  80") and they are different profiles.
                 id = picked ? FindSectionExact(lib.CatalogName.Length > 0 ? lib.CatalogName : lib.Name, lib.Name) : FindSectionInModel(key);
+
+                // A true outline from Rhino replaces the one of an earlier import.
+                if (id > 0 && lib != null && string.Equals(lib.Shape, "Polygon", StringComparison.OrdinalIgnoreCase) && App != null && lib.Outer.Count >= 3)
+                {
+                    try
+                    {
+                        // AxisVM refuses a section's own name here (name exists): go through a temporary one, the index and its members stay
+                        int rc = model.CrossSections.ReplaceWithCustom(id, lib.Name + " ~", Outline(lib), ECrossSectionProcess.cspOther);
+                        if (rc > 0) model.CrossSections.Item[id].Name = lib.Name;
+                        notes.Add(rc > 0 ? string.Format("Cross-section '{0}' was updated from the Rhino library.", lib.Name)
+                                         : string.Format("Cross-section '{0}' could not be updated (code {1}): the model keeps it as it was.", lib.Name, rc));
+                    }
+                    catch (Exception e) { notes.Add(string.Format("Cross-section '{0}' could not be updated ({1}): the model keeps it as it was.", lib.Name, e.Message)); }
+                }
 
                 if (id <= 0 && picked)
                     id = FromLibraryCatalog(lib);
@@ -447,6 +537,14 @@ namespace AxisVM_plugin.Core
                     case "pipe":
                         if (h > 0 && t > 0 && 2 * t < h) id = model.CrossSections.AddPipe(s.Name, h, t, ECrossSectionProcess.cspRolled);
                         break;
+                    case "polygon":
+                        id = AddPolygonSection(s);
+                        if (id <= 0 && b > 0 && h > 0)
+                        {
+                            id = AddRectangular(s.Name, b, h);
+                            if (id > 0) notes.Add(string.Format("Cross-section '{0}': AxisVM refused the outline, a rectangle of the same A and Iy ({1:0.#} x {2:0.#} mm) is used.", s.Name, s.B, s.H));
+                        }
+                        break;
                     case "recthollow":
                         if (b > 0 && h > 0 && t > 0 && 2 * t < Math.Min(b, h)) id = model.CrossSections.AddRectangularHollow(s.Name, b, h, t, t);
                         break;
@@ -461,6 +559,45 @@ namespace AxisVM_plugin.Core
             if (id > 0) notes.Add(string.Format("Cross-section '{0}' was created from the Rhino library ({1}).", s.Name, s.Shape));
             else notes.Add(string.Format("Library section '{0}' ({1}) has missing or invalid dimensions.", s.Name, s.Shape));
             return id;
+        }
+
+        /// <summary>A true outline with openings (millimetres; y = local y, z = local z). AxisVM wants the outline counter clockwise, openings clockwise.</summary>
+        private int AddPolygonSection(RhinoLibSection s)
+        {
+            if (App == null || s.Outer.Count < 3) return 0;
+            return model.CrossSections.AddCustom(s.Name, Outline(s), ECrossSectionProcess.cspOther);
+        }
+
+        private AxisVMPolygon2dList Outline(RhinoLibSection s)
+        {
+            AxisVMPolygon2dList list = App.ObjectCreator.NewPolygon2dList();
+            list.Add(Ring(s.Outer, false));
+            foreach (List<double[]> hole in s.Holes) list.Add(Ring(hole, true));
+            return list;
+        }
+
+        private AxisVMPolygon2d Ring(List<double[]> mm, bool hole)
+        {
+            double area = 0;
+            for (int i = 0; i < mm.Count; i++)
+            {
+                double[] p = mm[i], q = mm[(i + 1) % mm.Count];
+                area += p[0] * q[1] - q[0] * p[1];
+            }
+            List<double[]> r = new List<double[]>(mm);
+            if ((area > 0) == hole) r.Reverse();
+
+            AxisVMPolygon2d g = App.ObjectCreator.NewPolygon2d();
+            for (int i = 0; i < r.Count; i++)
+            {
+                double[] p = r[i], q = r[(i + 1) % r.Count];
+                RPoint2d a = new RPoint2d { Coord1 = p[0] / 1000.0, Coord2 = p[1] / 1000.0 };
+                RPoint2d b = new RPoint2d { Coord1 = q[0] / 1000.0, Coord2 = q[1] / 1000.0 };
+                AxisVMLine2d l = App.ObjectCreator.NewLine2d();
+                l.SetLinePoints(ref a, ref b);
+                g.AddLine(l);
+            }
+            return g;
         }
 
         /// <summary>CHS168.3x8, SHS100x100x6, RHS200x100x8, D300 -> a parametric section from the numbers (mm).</summary>
