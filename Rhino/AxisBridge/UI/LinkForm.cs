@@ -22,12 +22,13 @@ namespace AxisBridge.UI
         public LinkForm(RhinoDoc doc)
         {
             this.doc = doc;
-            Theme.Dialog(this, "AxLink", new Size(600, 440));
-            MinimumSize = new Size(520, 440);
+            Theme.Dialog(this, "AxLink", new Size(600, 520));
+            MinimumSize = new Size(520, 480);
 
             var body = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
+                AutoScroll = true,
                 ColumnCount = 2,
                 Padding = new Padding(14, 12, 14, 8),
                 BackColor = Theme.Background
@@ -35,7 +36,7 @@ namespace AxisBridge.UI
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             body.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-            body.Controls.Add(new Label { Text = "Live link file (shared with AxisVM: Rhino Import add-on > Live link)", Font = Theme.Bold, AutoSize = true, Margin = new Padding(3, 0, 3, 4) }, 0, 0);
+            body.Controls.Add(new Label { Text = "Live link file (shared with AxisVM: Rhino Import add-on, same file)", Font = Theme.Bold, AutoSize = true, Margin = new Padding(3, 0, 3, 4) }, 0, 0);
             body.SetColumnSpan(body.GetControlFromPosition(0, 0), 2);
 
             path = new TextBox { Dock = DockStyle.Fill, Text = AxLinkSync.LinkPath(doc) };
@@ -52,12 +53,15 @@ namespace AxisBridge.UI
             var send = new Button { Text = "Send to AxisVM", Width = 160, Height = 32, Font = Theme.Bold };
             Theme.StyleButton(send, true);
             send.Click += (s, e) => Run(SendNow);
-            body.Controls.Add(Theme.Hint("Writes this model (every object with Ax_* attributes) into the link file. Then in AxisVM: Rhino Import > Live link > Load from Rhino."), 0, 3);
+            body.Controls.Add(Theme.Hint("Writes this model (every object with Ax_* attributes) into the link file. Then in AxisVM: Rhino Import > From Rhino > " +
+                "Load from Rhino - with 'only what changed', AxisVM rebuilds just the objects you changed here (and their neighbours) and keeps the rest."), 0, 3);
             body.Controls.Add(send, 1, 3);
 
             var load = new Button { Text = "Load from AxisVM", Width = 160, Height = 32 };
             load.Click += (s, e) => Run(LoadNow);
-            body.Controls.Add(Theme.Hint("Applies what was changed in AxisVM and sent with 'Send to Rhino': moved nodes, sections, materials, slab type and thickness, new members and slabs, deletions. One Undo reverts it."), 0, 4);
+            body.Controls.Add(Theme.Hint("Applies what was changed in AxisVM and sent with 'Send to Rhino': moved nodes, sections, materials, slab type and thickness, " +
+                "supports, releases, springs, links, edge hinges, surface supports, new members / slabs / load panels, deletions. Objects AxisVM created keep " +
+                "their id on both sides. One Undo reverts it."), 0, 4);
             body.Controls.Add(load, 1, 4);
 
             var close = new Button { Text = "Close", Width = 100, Height = 30, DialogResult = DialogResult.Cancel };
@@ -155,7 +159,7 @@ namespace AxisBridge.UI
             }
 
             ExportResult res = AxLinkSync.Send(doc, LinkPath);
-            string text = string.Format("Sent to the link file: {0} point(s), {1} curve(s), {2} surface face(s).{3}\r\n\r\nIn AxisVM: Rhino Import > Live link > Load from Rhino.",
+            string text = string.Format("Sent to the link file: {0} point(s), {1} curve(s), {2} surface face(s).{3}\r\n\r\nIn AxisVM: Rhino Import > From Rhino > Load from Rhino.",
                 res.PointCount, res.LineCount, res.DomainCount, res.Warnings.Count > 0 ? "\r\n\r\nWarnings:\r\n  - " + string.Join("\r\n  - ", res.Warnings) : "");
             RhinoApp.WriteLine("AxLink: " + text.Replace("\r\n", " "));
             MessageBox.Show(this, text, "AxLink", MessageBoxButtons.OK, res.Warnings.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
@@ -173,7 +177,7 @@ namespace AxisBridge.UI
             {
                 sb.AppendLine(string.Format("Moved / reshaped:  {0}", r.Moved));
                 sb.AppendLine(string.Format("Properties set:    {0}", r.Updated));
-                sb.AppendLine(string.Format("Created:           {0}   (drawn in AxisVM, layers AxisVM::*)", r.Created));
+                sb.AppendLine(string.Format("Created:           {0}   (drawn in AxisVM, sorted into the AxLayer layers)", r.Created));
                 sb.AppendLine(string.Format("Deleted:           {0}", r.Deleted));
                 sb.AppendLine(string.Format("Unchanged:         {0}", r.Unchanged));
                 if (r.Library.Total > 0)

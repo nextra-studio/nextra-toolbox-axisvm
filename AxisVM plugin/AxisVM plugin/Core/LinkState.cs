@@ -228,6 +228,8 @@ namespace AxisVM_plugin.Core
                 case ELineType.ltBeam: return "Beam";
                 case ELineType.ltRib: return "Rib";
                 case ELineType.ltTruss: return "Truss";
+                case ELineType.ltSpring: return "Spring";
+                case ELineType.ltNNLink: return "NodeLink";
                 default: return "";
             }
         }

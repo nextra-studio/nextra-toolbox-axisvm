@@ -18,7 +18,7 @@ namespace AxisBridge.UI
         public static readonly string[] ScalarKeys =
         {
             AxKeys.Type, AxKeys.Material, AxKeys.Section, AxKeys.Release, AxKeys.LocalAxis, AxKeys.Eccentricity,
-            AxKeys.Stiffness, AxKeys.CoupledDof, AxKeys.HingeDomains, AxKeys.Support, AxKeys.Parts
+            AxKeys.Stiffness, AxKeys.CoupledDof, AxKeys.HingeDomains, AxKeys.Support, AxKeys.LineLink, AxKeys.Parts
         };
         public static readonly string[] FamilyKeys = { AxKeys.PointLoad, AxKeys.DistLoad };
 
@@ -32,11 +32,12 @@ namespace AxisBridge.UI
         private readonly TextField coupled;
         private readonly TextField hingeDomains;
         private readonly SupportField support;
+        private readonly TextField lineLink;
         private readonly TextField parts;
 
         private readonly Button stiffPresets;
         private readonly TabPage pageMember, pageLink, pageSupport, pageLoads, pageParts;
-        private readonly FieldPage.Row rowRelease, rowAxis, rowEcc, rowStiff, rowCoupled, rowHinge, rowRigidNote, rowSpringNote;
+        private readonly FieldPage.Row rowRelease, rowAxis, rowEcc, rowLineLink, rowStiff, rowCoupled, rowHinge, rowRigidNote, rowSpringNote;
 
         private static readonly Dictionary<string, string> DefaultMaterial = new Dictionary<string, string>
         {
@@ -73,6 +74,19 @@ namespace AxisBridge.UI
             rowAxis = member.Add("Local z reference", localAxis.Control, "Blank = AxisVM automatic orientation, or a direction vector, e.g. 0,0,1.");
             eccentricity = Track(new TextField(AxKeys.Eccentricity, "none"));
             rowEcc = member.Add("Eccentricity", eccentricity.Control, "Offset ex,ey,ez in " + DocUnitName + " (one value for both ends, or start=..; end=..).");
+            lineLink = Track(new TextField(AxKeys.LineLink, "none"));
+            var pickMaster = new Button { Text = "Pick...", AutoSize = true, Height = 25 };
+            pickMaster.Click += (s, e) =>
+            {
+                PendingPick = d =>
+                {
+                    string id = PickCurve(d, "Select the master curve this member is linked to (line-to-line link)");
+                    if (id != null) lineLink.Assign(id);
+                };
+                DialogResult = DialogResult.Retry;
+            };
+            rowLineLink = member.Add("Line link to", lineLink.Control,
+                "Line-to-line link: the id of the master curve (Pick). Rigid unless Ax_Stiffness (6 values) is set. Both curves must stay one AxisVM line each.", pickMaster);
             pageMember = AddPage("Member", member);
 
             // ---- Spring / link / hinge ---------------------------------------
@@ -110,7 +124,8 @@ namespace AxisBridge.UI
             var sup = new FieldPage();
             sup.Section("Line support");
             support = Track(new SupportField(true));
-            sup.Add("Support", support.Control, "Creates an AxisVM line (edge) support along the whole curve, e.g. the bottom edge of a wall.");
+            sup.Add("Support", support.Control, "Simple line on a slab / wall edge: an AxisVM edge support (6 values per metre). Beam or rib: an elastic " +
+                    "foundation along it (kx, ky, kz per metre in its local axes; rotations are ignored).");
             pageSupport = AddPage("Support", sup);
 
             // ---- Loads --------------------------------------------------------
@@ -157,7 +172,20 @@ namespace AxisBridge.UI
             coupled.Load(State.Get(AxKeys.CoupledDof), typeNow == AxSchema.NodeLink ? DefaultCoupled : "", fresh);
             hingeDomains.Load(State.Get(AxKeys.HingeDomains), "", fresh);
             support.Load(State.Get(AxKeys.Support), "", fresh);
+            lineLink.Load(State.Get(AxKeys.LineLink), "", fresh);
             parts.Load(State.Get(AxKeys.Parts), "", fresh);
+        }
+
+        /// <summary>One curve picked by the user, as its export id (the Rhino object id), or null.</summary>
+        private static string PickCurve(RhinoDoc doc, string prompt)
+        {
+            var go = new Rhino.Input.Custom.GetObject();
+            go.SetCommandPrompt(prompt);
+            go.GeometryFilter = Rhino.DocObjects.ObjectType.Curve;
+            go.EnablePreSelect(false, true);
+            go.DeselectAllBeforePostSelect = true;
+            if (go.Get() != Rhino.Input.GetResult.Object) return null;
+            return go.Object(0).ObjectId.ToString();
         }
 
         private static string Lookup(Dictionary<string, string> d, string key)
@@ -220,6 +248,7 @@ namespace AxisBridge.UI
             rowRelease.Visible = bending;
             rowAxis.Visible = bending;
             rowEcc.Visible = bending;
+            rowLineLink.Visible = frame;
             rowSpringNote.Visible = spring;
             rowStiff.Visible = spring || hinge;
             stiffPresets.Visible = hinge;
@@ -230,7 +259,7 @@ namespace AxisBridge.UI
             var pages = new List<TabPage>();
             if (frame) pages.Add(pageMember);
             if (spring || hinge || nodeLink || rigid) pages.Add(pageLink);
-            if (all || t == AxSchema.Rib || t == AxSchema.Simple) pages.Add(pageSupport);
+            if (all || t == AxSchema.Beam || t == AxSchema.Rib || t == AxSchema.Simple) pages.Add(pageSupport);
             if (bending) pages.Add(pageLoads);
             pages.Add(pageParts);
             ShowPages(pages);

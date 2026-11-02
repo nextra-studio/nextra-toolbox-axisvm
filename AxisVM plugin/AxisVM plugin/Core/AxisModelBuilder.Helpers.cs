@@ -125,6 +125,18 @@ namespace AxisVM_plugin.Core
                     Own(lineOwners, id, job.Src.Guid);
                 }
 
+            // The two link lines of a line-to-line link belong to its slave curve, marked apart (they are not part of its shape).
+            foreach (KeyValuePair<LineJob, int[]> kv in linkLines)
+                foreach (int id in kv.Value) Own(lineOwners, id, kv.Key.Src.Guid + LinkLineSuffix);
+
+            // "Only changes": a reused kept line or node keeps the kept objects it stands for too (a rebuilt edge hinge along a
+            // kept rib must not take the rib's id off their shared line).
+            if (Partial)
+            {
+                KeepOwners(lineOwners, TryGet(() => model.Lines.Attachments));
+                KeepOwners(nodeOwners, TryGet(() => model.Nodes.Attachments));
+            }
+
             foreach (KeyValuePair<int, List<string>> kv in nodeOwners) Stamp(() => model.Nodes.Attachments, kv.Key, string.Join(";", kv.Value));
             foreach (KeyValuePair<int, List<string>> kv in lineOwners) Stamp(() => model.Lines.Attachments, kv.Key, string.Join(";", kv.Value));
 
@@ -135,10 +147,27 @@ namespace AxisVM_plugin.Core
                     idMap.Add(string.Format("domain	{0}	{1}", s.Src.Guid, s.DomainId));
                     Stamp(() => model.Domains.Attachments, s.DomainId, s.Src.Guid);
                 }
-                foreach (int pid in s.PanelIds) idMap.Add(string.Format("loadpanel	{0}	{1}", s.Src.Guid, pid));
+                foreach (int pid in s.PanelIds)
+                {
+                    idMap.Add(string.Format("loadpanel	{0}	{1}", s.Src.Guid, pid));
+                    try { stats.PanelGuids[model.LoadPanels.get_UID(pid)] = s.Src.Guid; } catch { }
+                }
             }
 
             if (!attachmentsWork) WriteSidecar();
+        }
+
+        /// <summary>Adds the owners an entity already has that this run does not rebuild (kept objects sharing it).</summary>
+        private void KeepOwners(Dictionary<int, List<string>> owners, AxisVMAttachments a)
+        {
+            if (a == null) return;
+            foreach (KeyValuePair<int, List<string>> kv in owners)
+                foreach (string g in LinkState.Guids(a, kv.Key))
+                {
+                    int hash = g.IndexOf('#');
+                    string baseGuid = hash > 0 ? g.Substring(0, hash) : g;
+                    if (!opt.Diff.Build.Contains(baseGuid) && !kv.Value.Contains(g)) kv.Value.Add(g);
+                }
         }
 
         private static void Own(Dictionary<int, List<string>> owners, int id, string guid)

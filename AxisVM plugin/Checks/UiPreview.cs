@@ -138,7 +138,7 @@ internal static class UiPreview
     // One transparent PNG per tool (native 16 px and a 4x nearest-neighbour copy) so a new tool only adds files.
     private static void Icons()
     {
-        string[] names = { "RhinoImport", "OneWayLoadPanel", "LoadPanelTools", "EndPinAssign", "ReactionTransfer", "SectionModifier", "ConnectionLoadExtractor" };
+        string[] names = { "RhinoImport", "OneWayLoadPanel", "LoadPanelTools", "EndPinAssign", "ReactionTransfer", "SectionModifier", "ConnectionLoadExtractor", "TimberSls" };
         string folder = Path.Combine(output, "icons");
         Directory.CreateDirectory(folder);
         foreach (string name in names)

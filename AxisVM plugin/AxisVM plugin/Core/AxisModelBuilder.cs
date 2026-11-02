@@ -51,6 +51,12 @@ namespace AxisVM_plugin.Core
         /// Off by default - meshing a large model takes minutes; the report then says how many to mesh.
         /// </summary>
         public bool RemeshRebuilt;
+
+        /// <summary>
+        /// Update with "only changes" (see AxisModelBuilder.Diff.cs): delete what the plan says and build only its objects
+        /// (pass plan.Subset of the Rhino model), connecting them to the kept model. Null = replace everything.
+        /// </summary>
+        public LinkDiffPlan Diff;
     }
 
     /// <summary>Counters for the run summary.</summary>
@@ -66,8 +72,10 @@ namespace AxisVM_plugin.Core
         public int PanelsCreated;
         public int SupportsCreated;
         public int LineSupportsCreated;
+        public int SurfaceSupportsCreated;
         public int SpringsCreated;
         public int LinksCreated;
+        public int LineLinksCreated;
         public int RigidBodiesCreated;
         public int HingesCreated;
         public int DiaphragmsCreated;
@@ -78,6 +86,9 @@ namespace AxisVM_plugin.Core
 
         /// <summary>What an earlier import of the same file had created and this one replaced (null = no update).</summary>
         public LinkedItems Replaced;
+
+        /// <summary>Load panels built, UID -> the Rhino surface (the link file keeps it: panels carry no attachments).</summary>
+        public readonly Dictionary<int, string> PanelGuids = new Dictionary<int, string>();
     }
 
     /// <summary>
@@ -195,6 +206,8 @@ namespace AxisVM_plugin.Core
             public bool UsedByCrossable;
             public bool UsedByConnector;
             public int RhinoUses;
+            /// <summary>A line of the kept model ("only changes"), reused - never handed to CrossLines.</summary>
+            public bool Existing;
         }
 
         /// <summary>A segment of a chain, with its direction relative to the Rhino curve.</summary>
@@ -268,6 +281,11 @@ namespace AxisVM_plugin.Core
         /// <summary>Optional: told each finished step as it happens (test drivers print it).</summary>
         public Action<string> Log;
 
+        /// <summary>Test drivers only: Run ends after the step with this name (for narrowing down a failing step).</summary>
+        public string StopAfter;
+
+        private class Stopped : Exception { }
+
         private void Step(string name, Action action)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -275,9 +293,42 @@ namespace AxisVM_plugin.Core
             string line = string.Format(CultureInfo.InvariantCulture, "{0} {1:0.0} s", name, sw.Elapsed.TotalSeconds);
             Timings.Add(line);
             if (Log != null) Log(line);
+            if (name == StopAfter) throw new Stopped();
         }
 
+        /// <summary>
+        /// Builds the model. Run holds AxisVM's BeginUpdate itself (except on a dry run) and lifts it once in the middle to
+        /// join members (see <see cref="JoinMembers"/>), so callers must NOT wrap it in BeginUpdate / EndUpdate - a nested
+        /// update would keep that join inside one. The undo step (SaveUndo) stays with the caller.
+        /// </summary>
         public void Run()
+        {
+            try
+            {
+                Suspend();
+                RunSteps();
+            }
+            catch (Stopped) { }
+            finally { Resume(); }
+        }
+
+        private bool suspended;
+
+        private void Suspend()
+        {
+            if (opt.DryRun || suspended) return;
+            model.BeginUpdate();
+            suspended = true;
+        }
+
+        private void Resume()
+        {
+            if (!suspended) return;
+            suspended = false;
+            model.EndUpdate();
+        }
+
+        private void RunSteps()
         {
             Step("Validate", ValidateAttributeNames);
             Step("PrepareJobs", PrepareJobs);
@@ -290,6 +341,7 @@ namespace AxisVM_plugin.Core
                 {
                     CaptureBefore();
                     foreach (int uid in LineUids()) preexistingLineUids.Add(uid);
+                    if (Partial) SeedFromModel();
                 });
                 Step("Library", () => { catalog.CreateLibraryLoadCases(); catalog.CreateLibraryCombinations(); });
             }
@@ -307,16 +359,68 @@ namespace AxisVM_plugin.Core
             // afterwards keeps them in the diaphragm).
             Step("Diaphragms", BuildDiaphragms);
             Step("MemberTypes", ApplyMemberTypes);
+            Step("Members", () =>
+            {
+                if (pendingRuns.Count == 0) return;
+                Resume();
+                try { JoinMembers(); }
+                finally { Suspend(); }
+            });
             Step("Surfaces", BuildSurfaces);
             Step("Supports", ApplySupports);
             Step("Connectors", BuildConnectors);
+            Step("LineLinks", BuildLineLinks);
             Step("EdgeHinges", BuildEdgeHinges);
-            Step("Loads", BuildLoads);
+            Step("Loads", () => { ResolveMembers(); BuildLoads(); });
             Step("Parts", BuildParts);
             // Before the ids are stamped: meshing splits lines, and the pieces must carry the marks too.
             Step("Remesh", RestoreMeshes);
             Step("StampRhinoIds", StampRhinoIds);
             Step("MarkCreated", MarkCreated);
+            if (Partial && !opt.DryRun)
+            {
+                Step("CarryOver", CarryOver);
+                Step("AdoptKept", AdoptKept);
+            }
+        }
+
+        /// <summary>"Only changes": this run builds part of the model and connects it to the rest.</summary>
+        private bool Partial { get { return opt.Diff != null && !opt.Diff.Everything; } }
+
+        /// <summary>
+        /// "Only changes": the kept model's nodes and lines join this run's indexes, so the rebuilt objects snap to the
+        /// nodes they share with kept ones, are cut where a kept element ends on them, and reuse a kept line they run
+        /// along (a slab edge that is also a kept rib) instead of drawing a second line on top of it.
+        /// </summary>
+        private void SeedFromModel()
+        {
+            int n = SafeNodeCount();
+            if (n > 0)
+            {
+                try
+                {
+                    Array coords;
+                    if (model.Nodes.BulkGetCoord(Range(n), out coords) > 0 && coords != null)
+                    {
+                        int lo = coords.GetLowerBound(0);
+                        for (int i = 0; i < n && i < coords.Length; i++)
+                        {
+                            RPoint3d p = (RPoint3d)coords.GetValue(lo + i);
+                            double[] xyz = { p.x, p.y, p.z };
+                            nodes.Add(xyz[0], xyz[1], xyz[2], i + 1);
+                            importedNodePositions.Add(xyz);
+                        }
+                    }
+                }
+                catch { }
+            }
+            LiveModel live = ReadLive(Math.Max(opt.MergeToleranceM, 1e-6));
+            foreach (LiveSeg s in live.Segs)
+            {
+                if (s.IsArc) continue;
+                string key = PairKey(s.NodeA, s.NodeB);
+                if (!builtByKey.ContainsKey(key)) builtByKey[key] = new BuiltLine { Id = s.Id, NodeA = s.NodeA, NodeB = s.NodeB, Existing = true };
+            }
         }
 
         /// <summary>
@@ -724,7 +828,7 @@ namespace AxisVM_plugin.Core
             bool anyProtected = false;
             foreach (BuiltLine bl in builtByKey.Values)
             {
-                if (bl.Id <= 0) continue;
+                if (bl.Id <= 0 || bl.Existing) continue;
                 if (bl.UsedByCrossable && !bl.UsedByConnector) crossIds.Add(bl.Id);
                 else anyProtected = true;
             }
@@ -766,6 +870,9 @@ namespace AxisVM_plugin.Core
             {
                 LiveModel live = ReadLive(tol);
                 HashSet<int> protectedIds = ProtectedLines(live);
+                // Only this import's own straight lines are split (filtered once: "only changes" seeds every node of a
+                // large kept model, and testing each against every line took long).
+                List<LiveSeg> splittable = live.Segs.FindAll(s => !s.IsArc && !s.Preexisting && !protectedIds.Contains(s.Id));
 
                 bool split = false;
                 foreach (double[] p in importedNodePositions)
@@ -773,9 +880,9 @@ namespace AxisVM_plugin.Core
                     int nodeId;
                     if (!live.Index.TryFind(p[0], p[1], p[2], out nodeId)) continue;
 
-                    foreach (LiveSeg s in live.Segs)
+                    foreach (LiveSeg s in splittable)
                     {
-                        if (s.IsArc || s.Preexisting || protectedIds.Contains(s.Id) || s.NodeA == nodeId || s.NodeB == nodeId) continue;
+                        if (s.NodeA == nodeId || s.NodeB == nodeId) continue;
                         if (!Interior(s.A, s.B, p, tol)) continue;
 
                         string key = Fmt(p) + Fmt(s.A) + Fmt(s.B);
@@ -1010,8 +1117,9 @@ namespace AxisVM_plugin.Core
             liveNodes = live.Index;   // node ids changed - every later lookup uses the live index
             HashSet<int> protectedIds = ProtectedLines(live);
 
+            // "Only changes" builds onto the kept model: a rebuilt surface's edge may be a kept line (reused, see SeedFromModel).
             List<LiveSeg> crossable = new List<LiveSeg>();
-            foreach (LiveSeg s in live.Segs) if (!protectedIds.Contains(s.Id) && !s.IsArc && !s.Preexisting) crossable.Add(s);
+            foreach (LiveSeg s in live.Segs) if (!protectedIds.Contains(s.Id) && !s.IsArc && (!s.Preexisting || Partial)) crossable.Add(s);
 
             foreach (LineJob job in lineJobs)
             {
@@ -1028,7 +1136,7 @@ namespace AxisVM_plugin.Core
                     for (int i = 0; i + 1 < job.Path.Count; i++)
                     {
                         if (Dist(job.Path[i], job.Path[i + 1]) <= tol) continue;
-                        List<SegRef> piece = ChainAlong(job.Path[i], job.Path[i + 1], crossable, tol, i);
+                        List<SegRef> piece = Along(job.Path[i], job.Path[i + 1], crossable, tol, i);
                         if (piece.Count == 0) { c = new Chain(); break; }
                         foreach (SegRef r in piece) c.Add(r);
                     }
@@ -1046,6 +1154,9 @@ namespace AxisVM_plugin.Core
                 foreach (List<double[]> h in s.Holes) holes.Add(LoopAlong(h, crossable, tol));
                 s.HoleChains = holes;
             }
+
+            if (bridgedGaps > 0)
+                notes.Add(string.Format("Update: {0} small gap(s) between kept lines (where a rebuilt line was) were closed with a new line.", bridgedGaps));
         }
 
         private SegRef DirectSeg(LiveModel live, LineJob job)
@@ -1067,7 +1178,7 @@ namespace AxisVM_plugin.Core
             {
                 double[] p = loop[i], q = loop[(i + 1) % loop.Count];
                 if (Dist(p, q) <= tol) continue;
-                List<SegRef> piece = ChainAlong(p, q, segs, tol, i);
+                List<SegRef> piece = Along(p, q, segs, tol, i);
                 if (piece.Count == 0) return new Chain();
                 foreach (SegRef r in piece) c.Add(r);
             }
@@ -1078,7 +1189,29 @@ namespace AxisVM_plugin.Core
         /// The live straight segments that together run from p0 to p1, ordered from p0, or an empty
         /// list when the run cannot be matched without a gap.
         /// </summary>
-        private static List<SegRef> ChainAlong(double[] p0, double[] p1, List<LiveSeg> segs, double tol, int piece)
+        private List<SegRef> Along(double[] p0, double[] p1, List<LiveSeg> segs, double tol, int piece)
+        {
+            List<SegRef> r = ChainAlong(p0, p1, segs, tol, piece, false);
+            if (r.Count > 0 || !Partial) return r;
+
+            // Partial update: a kept line can end a few mm short of the next one where the line between them was deleted
+            // with a rebuilt neighbour. Bridge such a gap with a new line rather than lose the whole surface or curve.
+            r = ChainAlong(p0, p1, segs, tol, piece, true);
+            foreach (SegRef s in r)
+            {
+                if (s.Id != 0) continue;
+                BuiltLine bl = LineFor(s.CurveStartNode, s.CurveEndNode);
+                if (bl == null) return new List<SegRef>();
+                s.Id = bl.Id;
+                s.Reversed = bl.NodeA != s.CurveStartNode;
+                bridgedGaps++;
+            }
+            return r;
+        }
+
+        private int bridgedGaps;
+
+        private static List<SegRef> ChainAlong(double[] p0, double[] p1, List<LiveSeg> segs, double tol, int piece, bool bridge)
         {
             List<SegRef> result = new List<SegRef>();
 
@@ -1106,27 +1239,70 @@ namespace AxisVM_plugin.Core
             }
 
             if (hits.Count == 0) return result;
-            hits.Sort((x, y) => x.Key.CompareTo(y.Key));
 
-            double cursor = 0.0;
+            // End to end: each next segment starts on the node where the last one ended (the shortest such first, so a long
+            // line lying over several pieces is never taken together with them - that would hand AxisVM a branching loop,
+            // rejected as "more than one contour"). A dead end backs up and tries the next longer one: in a partial update a
+            // kept mesh line can end on a node a few mm off the edge whose continuation was deleted, while a new line runs on.
+            int budget = 20000;
+            if (!Extend(hits, spans, len, slack, tol, bridge, 0.0, 0, new HashSet<int>(), result, piece, ref budget))
+                result.Clear();
+            return result;
+        }
+
+        /// <summary>
+        /// Depth-first continuation of a chain from cursor/atNode. With bridge, a next segment up to the slack away on
+        /// another node is allowed too, preceded by a SegRef with Id 0 that the caller turns into a new line.
+        /// </summary>
+        private static bool Extend(List<KeyValuePair<double, LiveSeg>> hits, Dictionary<int, double[]> spans, double len,
+            double slack, double tol, bool bridge, double cursor, int atNode, HashSet<int> used, List<SegRef> result, int piece, ref int budget)
+        {
+            if (cursor >= len - slack) return true;
+            if (--budget < 0) return false;
+
+            // Same node first, then another node within the merge tolerance, then (bridge only) one across a small gap.
+            List<KeyValuePair<double, LiveSeg>> options = new List<KeyValuePair<double, LiveSeg>>();
+            Dictionary<int, int> rank = new Dictionary<int, int>();
             foreach (var h in hits)
             {
+                if (used.Contains(h.Value.Id)) continue;
                 double[] t = spans[h.Value.Id];
-                double lo = Math.Min(t[0], t[1]), hi = Math.Max(t[0], t[1]);
-                if (lo > cursor + slack) return new List<SegRef>();   // gap
-                if (hi <= cursor + slack) continue;                    // duplicate / overlapping segment
                 bool rev = t[0] > t[1];
+                double lo = rev ? t[1] : t[0], hi = rev ? t[0] : t[1];
+                if (Math.Abs(lo - cursor) > slack || hi <= cursor + slack) continue;
+                int start = rev ? h.Value.NodeB : h.Value.NodeA;
+                int r = atNode == 0 || start == atNode ? 0 : Math.Abs(lo - cursor) <= tol ? 1 : 2;
+                if (r == 2 && (!bridge || lo <= cursor)) continue;
+                rank[h.Value.Id] = r;
+                options.Add(new KeyValuePair<double, LiveSeg>(hi, h.Value));
+            }
+            options.Sort((x, y) =>
+            {
+                int a = rank[x.Value.Id], b = rank[y.Value.Id];
+                return a != b ? a.CompareTo(b) : x.Key.CompareTo(y.Key);
+            });
+
+            foreach (var o in options)
+            {
+                LiveSeg next = o.Value;
+                bool rev = spans[next.Id][0] > spans[next.Id][1];
+                int start = rev ? next.NodeB : next.NodeA;
+                bool gap = rank[next.Id] == 2;
+                double from = gap ? Math.Min(spans[next.Id][0], spans[next.Id][1]) : cursor;
+                if (gap) result.Add(new SegRef { Id = 0, Length = from - cursor, Piece = piece, CurveStartNode = atNode, CurveEndNode = start });
+                used.Add(next.Id);
                 result.Add(new SegRef
                 {
-                    Id = h.Value.Id, Reversed = rev, Length = hi - lo, Piece = piece,
-                    CurveStartNode = rev ? h.Value.NodeB : h.Value.NodeA,
-                    CurveEndNode = rev ? h.Value.NodeA : h.Value.NodeB
+                    Id = next.Id, Reversed = rev, Length = o.Key - from, Piece = piece,
+                    CurveStartNode = start,
+                    CurveEndNode = rev ? next.NodeA : next.NodeB
                 });
-                cursor = hi;
+                if (Extend(hits, spans, len, slack, tol, bridge, o.Key, rev ? next.NodeA : next.NodeB, used, result, piece, ref budget)) return true;
+                result.RemoveAt(result.Count - 1);
+                if (gap) result.RemoveAt(result.Count - 1);
+                used.Remove(next.Id);
             }
-
-            if (cursor < len - slack) return new List<SegRef>();
-            return result;
+            return false;
         }
 
         private static bool OnLine(double[] p0, double ux, double uy, double uz, double[] q, double tol, out double t)

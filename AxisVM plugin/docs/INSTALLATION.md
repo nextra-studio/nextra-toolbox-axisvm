@@ -51,6 +51,7 @@ It reads the tool list from `tools.json`, verifies that every DLL is present, ba
 - `ReactionTransferAddon.dll`
 - `SectionModifierAddon.dll`
 - `ConnectionLoadExtractorAddon.dll`
+- `TimberSlsAddon.dll`
 <!-- /gen:dll-list -->
 
 ![Copy the DLLs into the AxisVM AddOns folder](images/install/manual-copy.svg)

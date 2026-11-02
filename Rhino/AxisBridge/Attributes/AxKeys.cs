@@ -33,8 +33,10 @@ namespace AxisBridge.Attributes
         public const string Stiffness = "Ax_Stiffness";
         public const string HingeDomains = "Ax_HingeDomains";
         public const string CoupledDof = "Ax_CoupledDOF";
+        public const string LineLink = "Ax_LineLink";         // line-to-line link: on the slave curve, the id of the master curve
 
         // Surface attributes (domains and load panels)
+        public const string SurfaceSupport = "Ax_SurfaceSupport"; // elastic foundation under a domain: "kz" or "kx,ky,kz" (kN/m/m²)
         public const string FeType = "Ax_FEType";
         public const string Thickness = "Ax_Thickness";
         public const string SpanDirection = "Ax_SpanDirection";
@@ -52,7 +54,8 @@ namespace AxisBridge.Attributes
         private static readonly HashSet<string> ExactKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             Guid, Support, Type, Material, Section, Release, LocalAxis, Eccentricity,
-            Stiffness, HingeDomains, CoupledDof, FeType, Thickness, SpanDirection, EdgeSpacing, SpanTolerance, LoadTargets, Parts, Diaphragm
+            Stiffness, HingeDomains, CoupledDof, LineLink, FeType, Thickness, SpanDirection, EdgeSpacing, SpanTolerance, LoadTargets, Parts, Diaphragm,
+            SurfaceSupport
         };
 
         /// <summary>

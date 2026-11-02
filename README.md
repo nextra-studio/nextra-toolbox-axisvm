@@ -16,6 +16,7 @@ AxisVM X8 add-ons for model preparation and result extraction, plus the companio
 | ![Reaction transfer](AxisVM%20plugin/docs/images/icons/ReactionTransfer@4x.png) | [Reaction transfer](AxisVM%20plugin/docs/user-guide/reaction-transfer.md) | Turn support reactions into point loads in a target model. | Released |
 | ![Section modifier](AxisVM%20plugin/docs/images/icons/SectionModifier@4x.png) | [Section modifier](AxisVM%20plugin/docs/user-guide/section-modifier.md) | Set rectangular section width and depth. | Released |
 | ![Connection loads](AxisVM%20plugin/docs/images/icons/ConnectionLoadExtractor@4x.png) | [Connection loads](AxisVM%20plugin/docs/user-guide/connection-loads.md) | Extract concurrent forces and moments for governing combinations. | Released |
+| ![Timber SLS check](AxisVM%20plugin/docs/images/icons/TimberSls@4x.png) | [Timber SLS check](AxisVM%20plugin/docs/user-guide/timber-sls.md) | Timber deflection (EC5, NL NA / Harff) and floor vibration (EC5:2004 or 2025) for floor and roof members. | **WIP** |
 <!-- /gen:tools-root -->
 
 A tool that is still being developed carries **(WIP)** in its AxisVM menu text and in this table. New tools start as WIP until they are validated; all current tools are released.
@@ -84,6 +85,7 @@ If PowerShell refuses to run it, use `powershell -ExecutionPolicy Bypass -File .
 - `ReactionTransferAddon.dll`
 - `SectionModifierAddon.dll`
 - `ConnectionLoadExtractorAddon.dll`
+- `TimberSlsAddon.dll`
 <!-- /gen:dll-list -->
 
 ![Copy the DLLs from the ZIP into the AxisVM AddOns folder](AxisVM%20plugin/docs/images/install/manual-copy.svg)

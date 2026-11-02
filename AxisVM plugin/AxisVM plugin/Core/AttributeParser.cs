@@ -57,6 +57,9 @@ namespace AxisVM_plugin.Core
         /// <summary>Line support / edge hinge rotational stiffness per length: kNm/rad/m (1 Nmm/rad/mm = 1e-3).</summary>
         public double LineRotStiffness(double v) { return Nmm ? v * 1e-3 : v; }
 
+        /// <summary>Surface support (elastic foundation) stiffness per area: kN/m/m² (1 N/mm/mm² = 1e6 kN/m³).</summary>
+        public double SurfaceStiffness(double v) { return Nmm ? v * 1e6 : v; }
+
         public static readonly string[] LengthUnitNames = { "mm", "m" };
         public static readonly double[] LengthUnitFactors = { 0.001, 1.0 };
 
@@ -315,6 +318,23 @@ namespace AxisVM_plugin.Core
             stiff = new double[6];
             for (int i = 0; i < 3; i++) stiff[i] = perLength ? units.LineStiffness(raw[i]) : units.Stiffness(raw[i]);
             for (int i = 3; i < 6; i++) stiff[i] = perLength ? units.LineRotStiffness(raw[i]) : units.RotStiffness(raw[i]);
+            return true;
+        }
+
+        /// <summary>Reads Ax_SurfaceSupport: "kz" (vertical only) or "kx,ky,kz", in kN/m/m² (local x, y, z of the domain).</summary>
+        public static bool TryParseSurfaceSupport(string value, AxUnits units, out double[] stiff, out string err)
+        {
+            stiff = null;
+            double[] raw;
+            if (value != null && value.IndexOf(',') < 0 && TryParseNumbers(value, 1, out raw, out err)) raw = new[] { 0.0, 0.0, raw[0] };
+            else if (!TryParseNumbers(value, 3, out raw, out err)) { err = "expected 'kz' or 'kx,ky,kz' (" + err + ")"; return false; }
+            err = null;
+            stiff = new double[3];
+            for (int i = 0; i < 3; i++)
+            {
+                if (raw[i] < 0) { err = "a stiffness cannot be negative"; return false; }
+                stiff[i] = units.SurfaceStiffness(raw[i]);
+            }
             return true;
         }
 

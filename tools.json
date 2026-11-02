@@ -14,7 +14,9 @@
     { "id": "SectionModifier", "menu": "N. Section Modifier", "title": "Section modifier", "dll": "SectionModifierAddon.dll", "guide": "section-modifier.md", "status": "released",
       "summary": "Set rectangular section width and depth." },
     { "id": "ConnectionLoadExtractor", "menu": "N. Connection Load Extractor", "title": "Connection loads", "dll": "ConnectionLoadExtractorAddon.dll", "guide": "connection-loads.md", "status": "released",
-      "summary": "Extract concurrent forces and moments for governing combinations." }
+      "summary": "Extract concurrent forces and moments for governing combinations." },
+    { "id": "TimberSls", "menu": "N. Timber SLS Check   (WIP)", "title": "Timber SLS check", "dll": "TimberSlsAddon.dll", "guide": "timber-sls.md", "status": "wip",
+      "summary": "Timber deflection (EC5, NL NA / Harff) and floor vibration (EC5:2004 or 2025) for floor and roof members." }
   ],
   "rhino": { "name": "Nextra-AxisRhinoImport", "files": ["AxisBridge.rhp", "Newtonsoft.Json.dll"] }
 }

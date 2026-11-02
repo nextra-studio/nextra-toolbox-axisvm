@@ -26,6 +26,8 @@ namespace AxisVM_plugin.Core
         /// <summary>The same drawing scaled to <paramref name="size"/> px (nearest neighbour), for toolbars with larger buttons.</summary>
         public static byte[] ConnectionLoadExtractor(int size) { return ToBmp(Scale(Preview("ConnectionLoadExtractor"), size), size); }
         public static byte[] RhinoImport() { return ToBmp(Preview("RhinoImport")); }
+        public static byte[] TimberSls() { return ToBmp(Preview("TimberSls")); }
+        public static byte[] TimberSls(int size) { return ToBmp(Scale(Preview("TimberSls"), size), size); }
 
         /// <summary>Native-size bitmap; callers own it. Documentation uses the same drawing code.</summary>
         public static Bitmap Preview(string name)
@@ -72,6 +74,16 @@ namespace AxisVM_plugin.Core
                         Arrow(g, orange, 8, 5, 8, 11);
                         g.DrawLine(blue, 2, 13, 13, 13);
                         for (int x = 3; x <= 12; x += 3) g.DrawLine(grey, x, 14, x - 1, 15);
+                        break;
+                    case "TimberSls":
+                        // A beam on two supports with its sagging deflection line below it.
+                        g.DrawLine(blue, 1, 4, 14, 4);
+                        g.DrawLine(grey, 2, 5, 0, 8);
+                        g.DrawLine(grey, 2, 5, 4, 8);
+                        g.DrawLine(grey, 13, 5, 11, 8);
+                        g.DrawLine(grey, 13, 5, 15, 8);
+                        g.DrawLines(orange, new[] { new Point(2, 6), new Point(5, 10), new Point(8, 12), new Point(10, 11), new Point(13, 6) });
+                        g.DrawLine(orange, 8, 12, 8, 14);
                         break;
                     case "SectionModifier":
                         // I section with a double-headed depth dimension beside it.

@@ -117,7 +117,7 @@ namespace AxisBridge.UI
             page.Controls.Add(SectionLabel("Size"));
             page.Controls.Add(Slider("Symbols", 25, 300, Last.SymbolScale, v => Last.SymbolScale = v));
             page.Controls.Add(Slider("Arrow length", 25, 400, Last.ArrowScale, v => Last.ArrowScale = v));
-            var labelSize = new NumericUpDown { Minimum = 8, Maximum = 24, Value = Math.Max(8, Math.Min(24, Last.LabelSize)), Width = 60 };
+            var labelSize = new NumericUpDown { Minimum = 3, Maximum = 24, Value = Math.Max(3, Math.Min(24, Last.LabelSize)), Width = 60 };
             labelSize.ValueChanged += (s, e) => { Last.LabelSize = (int)labelSize.Value; AxVisualConduit.Redraw(); };
             page.Controls.Add(Row("Text size", labelSize));
 
@@ -151,10 +151,12 @@ namespace AxisBridge.UI
             FillCases();
         }
 
-        /// <summary>One tick per element type found in the model; unticked types stay hidden across refreshes.</summary>
+        /// <summary>One tick per element type (every standard one, plus any other found in the model); unticked types stay hidden across refreshes.</summary>
         private void FillTypes()
         {
             var names = new List<string>(conduit.TypeNames);
+            foreach (string t in TypeOrder)
+                if (t != "Untyped" && t != "Other" && !names.Exists(n => string.Equals(n, t, StringComparison.OrdinalIgnoreCase))) names.Add(t);
             names.Sort((a, b) =>
             {
                 int ia = Array.IndexOf(TypeOrder, a), ib = Array.IndexOf(TypeOrder, b);
@@ -172,7 +174,7 @@ namespace AxisBridge.UI
                 typeList.EndUpdate();
             }
             finally { updatingTypes = false; }
-            int rows = Math.Max(1, Math.Min(12, names.Count));
+            int rows = Math.Max(1, Math.Min(15, names.Count));
             typeList.Height = rows * typeList.ItemHeight + 6;
         }
 

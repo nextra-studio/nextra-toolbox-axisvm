@@ -88,7 +88,7 @@ namespace AxisVM_plugin.Core
                     ApplyLocalAxis(owned, job);
                     ApplyChainReleases(job);
                 }
-                AssembleMembers(job);
+                PlanMembers(job);
             }
 
             if (orientRefused.Count > 0)
@@ -386,11 +386,25 @@ namespace AxisVM_plugin.Core
             return true;
         }
 
-        /// <summary>One AxisVM structural member per straight run of the curve (a polyline gives one per side).</summary>
-        private void AssembleMembers(LineJob job)
+        /// <summary>A straight run of a curve split into several lines, to be joined into one AxisVM member.</summary>
+        private class MemberRun
         {
-            int i = 0, runs = 0, member = 0, owned = 0;
+            public LineJob Job;
+            public int[] Lines;
+        }
+
+        private readonly List<MemberRun> pendingRuns = new List<MemberRun>();
+
+        /// <summary>
+        /// One AxisVM structural member per straight run of the curve (a polyline gives one per side). A line typed as beam
+        /// or rib already is a member of its own, so only runs of several lines need joining - done later by
+        /// <see cref="JoinMembers"/>, outside BeginUpdate.
+        /// </summary>
+        private void PlanMembers(LineJob job)
+        {
+            int i = 0, runs = 0, owned = 0;
             List<SegRef> segs = job.Chain.Segs;
+            List<int> last = null;
             while (i < segs.Count)
             {
                 int piece = segs[i].Piece;
@@ -404,16 +418,65 @@ namespace AxisVM_plugin.Core
                 if (run.Count == 0) continue;
                 runs++;
                 owned += run.Count;
-                try
-                {
-                    member = model.Members.Add(Ids(run.ToArray()));
-                    if (member > 0 && run.Count > 1) stats.MembersAssembled++;
-                }
-                catch { member = 0; }
+                last = run;
+                if (run.Count > 1) pendingRuns.Add(new MemberRun { Job = job, Lines = run.ToArray() });
             }
             // The whole curve is one member: its loads go on the member, as AxisVM's own member loads.
-            if (runs == 1 && owned == segs.Count && member > 0) memberOfJob[job] = member;
+            if (runs == 1 && owned == segs.Count) memberLineOfJob[job] = last[0];
         }
+
+        /// <summary>
+        /// Joins the planned runs into members. Members.Add while the model is in BeginUpdate corrupts AxisVM's heap on large
+        /// models (it crashed at EndUpdate, or shortly after, loading 190 runs into an empty model - verified 2026-10-23), so
+        /// Run calls this between two update blocks. A run AxisVM refuses keeps its lines as separate members, and its curve
+        /// then takes its loads line by line.
+        /// </summary>
+        private void JoinMembers()
+        {
+            foreach (MemberRun r in pendingRuns)
+            {
+                int member;
+                try { member = model.Members.Add(Ids(r.Lines)); }
+                catch { member = 0; }
+                if (member > 0) stats.MembersAssembled++;
+                else memberLineOfJob.Remove(r.Job);
+            }
+        }
+
+        /// <summary>
+        /// The member of every curve that became exactly one member, read in one call just before the loads: joining renumbers
+        /// members, so ids returned along the way go stale.
+        /// </summary>
+        private void ResolveMembers()
+        {
+            memberOfJob.Clear();
+            if (memberLineOfJob.Count == 0) return;
+            List<LineJob> jobs = new List<LineJob>(memberLineOfJob.Keys);
+            int[] lines = new int[jobs.Count];
+            for (int k = 0; k < jobs.Count; k++) lines[k] = memberLineOfJob[jobs[k]];
+            try
+            {
+                Array ids;
+                if (model.Lines.BulkGetMemberIds(Ids(lines), out ids) > 0 && ids != null && ids.Length >= jobs.Count)
+                {
+                    int lo = ids.GetLowerBound(0);
+                    for (int k = 0; k < jobs.Count; k++)
+                    {
+                        int m = Convert.ToInt32(ids.GetValue(lo + k));
+                        if (m > 0) memberOfJob[jobs[k]] = m;
+                    }
+                    return;
+                }
+            }
+            catch { }
+            for (int k = 0; k < jobs.Count; k++)
+            {
+                try { int m = model.Lines.Item[lines[k]].MemberID; if (m > 0) memberOfJob[jobs[k]] = m; } catch { }
+            }
+        }
+
+        /// <summary>A line of each curve that became exactly one member (the member is looked up from it, see ResolveMembers).</summary>
+        private readonly Dictionary<LineJob, int> memberLineOfJob = new Dictionary<LineJob, int>();
 
         /// <summary>Curves that became exactly one AxisVM structural member (all their segments, one straight run).</summary>
         private readonly Dictionary<LineJob, int> memberOfJob = new Dictionary<LineJob, int>();
@@ -498,16 +561,34 @@ namespace AxisVM_plugin.Core
                 }
                 if (opt.DryRun) { stats.LineSupportsCreated++; continue; }
 
+                bool rotationsIgnored = false;
                 foreach (SegRef s in job.Chain.Segs)
                 {
                     try
                     {
-                        // AxisVM only accepts an edge support when it is told which domain the edge belongs to
-                        // (code -103 otherwise), so a line support must lie on a slab / wall / plate edge.
+                        // A beam or rib: an elastic foundation along it (translations only, in its local x, y, z).
+                        LineRole applied;
+                        if (segmentRole.TryGetValue(s.Id, out applied) && (applied == LineRole.Beam || applied == LineRole.Rib))
+                        {
+                            RStiffnessesXYZ kf = new RStiffnessesXYZ { x = k[0], y = k[1], z = k[2] };
+                            RNonLinearityXYZ nlf = new RNonLinearityXYZ();
+                            RResistancesXYZ rsf = new RResistancesXYZ();
+                            int fid = applied == LineRole.Beam
+                                ? model.LineSupports.AddBeamElasticFoundation(s.Id, ref kf, ref nlf, ref rsf)
+                                : model.LineSupports.AddRibElasticFoundation(s.Id, ref kf, ref nlf, ref rsf);
+                            if (fid > 0) stats.LineSupportsCreated++;
+                            else { notes.Add(string.Format("{0}: AxisVM rejected the elastic foundation (code {1}).", job.Context, fid)); break; }
+                            if (k[3] != 0 || k[4] != 0 || k[5] != 0) rotationsIgnored = true;
+                            continue;
+                        }
+
+                        // A plain line: an edge support. AxisVM only accepts one when it is told which domain the edge
+                        // belongs to (code -103 otherwise), so it must lie on a slab / wall / plate edge.
                         int domainId = DomainOwningEdge(s.Id);
                         if (domainId <= 0)
                         {
-                            notes.Add(job.Context + ": a line support must lie on the edge of a domain (slab, wall, plate); this line is not on one. Ignored.");
+                            notes.Add(job.Context + ": a support on a plain line must lie on the edge of a domain (slab, wall, plate) - this one is not; " +
+                                      "make it a Beam or Rib for an elastic foundation along it. Ignored.");
                             break;
                         }
                         RStiffnesses stiff = ToStiffnesses(k);
@@ -523,6 +604,8 @@ namespace AxisVM_plugin.Core
                         break;
                     }
                 }
+                if (rotationsIgnored)
+                    notes.Add(job.Context + ": an elastic foundation along a beam or rib takes the three translations only - the rotational stiffnesses of Ax_Support were ignored.");
             }
         }
 
@@ -690,6 +773,104 @@ namespace AxisVM_plugin.Core
             CreateNodeLink(job, lineId);
         }
 
+        // ==================================================================
+        // 4c' - line-to-line links
+        // ==================================================================
+
+        /// <summary>Suffix of the RhinoGuid on the two link lines of a line-to-line link: "&lt;slave curve id&gt;#link".</summary>
+        public const string LinkLineSuffix = "#link";
+
+        /// <summary>Slave curve -> the two link lines drawn for its line-to-line link (stamped in StampRhinoIds).</summary>
+        private readonly Dictionary<LineJob, int[]> linkLines = new Dictionary<LineJob, int[]>();
+
+        /// <summary>
+        /// Ax_LineLink on a curve: a line-to-line link from the curve it names (master) to this one (slave). AxisVM defines
+        /// one by the two lines and two link lines joining their ends (RLLLinkElementRec.MasterStartLink / MasterEndLink are
+        /// line ids - verified 2026-10-23), so those are drawn here, master start to the nearer slave end. Both curves must
+        /// have stayed one AxisVM line each.
+        /// </summary>
+        private void BuildLineLinks()
+        {
+            Dictionary<string, LineJob> byGuid = new Dictionary<string, LineJob>(StringComparer.OrdinalIgnoreCase);
+            foreach (LineJob j in lineJobs) byGuid[j.Src.Guid] = j;
+
+            foreach (LineJob job in lineJobs)
+            {
+                string masterGuid = job.Src.Attr(AxKeys.LineLink);
+                if (masterGuid == null) continue;
+                LineJob master;
+                if (!byGuid.TryGetValue(masterGuid.Trim(), out master) || master == job)
+                {
+                    notes.Add(job.Context + ": Ax_LineLink names '" + masterGuid + "', which is not a curve of this model. No link was created.");
+                    stats.AttributeErrors++;
+                    continue;
+                }
+                if (job.Chain.Segs.Count != 1 || master.Chain.Segs.Count != 1)
+                {
+                    notes.Add(string.Format("{0}: a line-to-line link needs both curves to stay one AxisVM line each; this one or {1} was split by crossing elements. No link was created.", job.Context, master.Context));
+                    continue;
+                }
+
+                double[] k = AllCoupled();
+                string stiffText = job.Src.Attr(AxKeys.Stiffness);
+                string err;
+                if (stiffText != null && !AttributeParser.TryParseStiffness(stiffText, opt.Units, out k, out err))
+                {
+                    notes.Add(string.Format("{0}: Ax_Stiffness - {1}. The link was made rigid.", job.Context, err));
+                    stats.AttributeErrors++;
+                    k = AllCoupled();
+                }
+                if (opt.DryRun) { stats.LineLinksCreated++; continue; }
+
+                SegRef m = master.Chain.Segs[0], s = job.Chain.Segs[0];
+                double[] ms = NodeXyz(m.CurveStartNode), me = NodeXyz(m.CurveEndNode), ss = NodeXyz(s.CurveStartNode), se = NodeXyz(s.CurveEndNode);
+                if (ms == null || me == null || ss == null || se == null) { notes.Add(job.Context + ": its line-to-line link could not be placed."); continue; }
+                bool straight = Dist(ms, ss) + Dist(me, se) <= Dist(ms, se) + Dist(me, ss);
+                int toStart = straight ? s.CurveStartNode : s.CurveEndNode, toEnd = straight ? s.CurveEndNode : s.CurveStartNode;
+
+                int l1 = 0, l2 = 0;
+                try
+                {
+                    RLineGeomData g = new RLineGeomData();
+                    l1 = model.Lines.Add(m.CurveStartNode, toStart, ELineGeomType.lgtStraightLine, ref g);
+                    l2 = model.Lines.Add(m.CurveEndNode, toEnd, ELineGeomType.lgtStraightLine, ref g);
+                    RLLLinkElementRec rec = new RLLLinkElementRec
+                    {
+                        MasterLine = m.Id, SlaveLine = s.Id, MasterStartLink = l1, MasterEndLink = l2,
+                        PositionType = EBeamRibDistributionType.brdtLength, Position = 0.0,
+                        Stiffnesses = ToStiffnesses(k), Resistances = new RResistances(), NonLinearity = new RNonLinearity()
+                    };
+                    int id = l1 > 0 && l2 > 0 ? model.LinkElements.AddLL(ref rec) : 0;
+                    if (id > 0)
+                    {
+                        stats.LineLinksCreated++;
+                        linkLines[job] = new[] { l1, l2 };
+                        // AxisVM turns linked beams into ribs at some later model update (seen after adding a spring); do
+                        // it now, so what this load records is what AxisVM keeps and Send reports no change later.
+                        foreach (int l in new[] { m.Id, s.Id }) MakeRib(l, job.Context);
+                        continue;
+                    }
+                    notes.Add(string.Format("{0}: AxisVM rejected the line-to-line link to {1} (code {2}).", job.Context, master.Context, id));
+                }
+                catch (Exception ex) { notes.Add(string.Format("{0}: its line-to-line link could not be created ({1}).", job.Context, ex.Message)); }
+                // Not linked: the two helper lines go again (higher index first).
+                foreach (int l in new[] { Math.Max(l1, l2), Math.Min(l1, l2) }) { try { if (l > 0) model.Lines.Delete(l); } catch { } }
+            }
+        }
+
+        private void MakeRib(int lineId, string context)
+        {
+            RLineAttr_V161 a;
+            if (!TryGetLineAttrV161(lineId, out a) || a.LineType != ELineType.ltBeam) return;
+            a.LineType = ELineType.ltRib;
+            if (TrySetLineAttrV161(lineId, a) && LineTypeIs(lineId, ELineType.ltRib))
+            {
+                segmentRole[lineId] = LineRole.Rib;
+                return;
+            }
+            notes.Add(context + ": a beam in a line-to-line link could not be made a rib; AxisVM may change it to one later.");
+        }
+
         private static double[] AllCoupled()
         {
             double[] k = new double[6];
@@ -806,19 +987,144 @@ namespace AxisVM_plugin.Core
                 if (ids.Count == 0) { notes.Add("Rigid diaphragm '" + name + "': none of its lines were found."); continue; }
                 if (opt.DryRun) { stats.DiaphragmsCreated++; continue; }
                 try { model.Diaphragm.RemoveLinesFromDiaphragm(Ids(ids.ToArray())); } catch { }
+
+                // "Only changes": the kept members of this diaphragm join (see TakeKeptDiaphragm).
+                List<int> kept = new List<int>();
+                Action restore = null, dropOld = null;
+                if (Partial) kept = TakeKeptDiaphragm(name, ids, out restore, out dropOld);
+                ids.AddRange(kept);
+
                 string plane;
                 int dof = DiaphragmDof(ids, out plane);
                 if (dof == 0)
                 {
-                    notes.Add("Rigid diaphragm '" + name + "': its lines do not lie in one XY, XZ or YZ plane - not created.");
+                    // The kept diaphragm stays as it was; only the rebuilt lines are left out.
+                    notes.Add("Rigid diaphragm '" + name + "': its lines do not lie in one XY, XZ or YZ plane - " +
+                              (kept.Count > 0 ? "the rebuilt lines were not added to it." : "not created."));
                     continue;
                 }
+                if (dropOld != null) dropOld();
                 int rc;
                 try { rc = model.Diaphragm.Add(dof, Ids(ids.ToArray())); }
-                catch (Exception ex) { notes.Add("Rigid diaphragm '" + name + "': AxisVM refused it (" + ex.Message + ")."); continue; }
+                catch (Exception ex) { rc = 0; notes.Add("Rigid diaphragm '" + name + "': AxisVM refused it (" + ex.Message + ")."); }
                 if (rc > 0) stats.DiaphragmsCreated++;
-                else notes.Add(string.Format("Rigid diaphragm '{0}' ({1} plane): AxisVM refused it (code {2}).", name, plane, rc));
+                else if (rc < 0) notes.Add(string.Format("Rigid diaphragm '{0}' ({1} plane): AxisVM refused it (code {2}).", name, plane, rc));
+                if (restore != null) restore();
             }
+        }
+
+        private Dictionary<string, List<int>> linesByGuid;
+
+        /// <summary>
+        /// "Only changes": the AxisVM diaphragm(s) holding the kept members named <paramref name="name"/> are deleted and
+        /// their lines returned, with <paramref name="restore"/> to run once the diaphragm is made again with the rebuilt
+        /// lines added. Empty when no kept member is in that diaphragm.
+        ///
+        /// Diaphragm.Add makes every beam and rib in it a plain line; their members (and member loads) stay. Restoring the
+        /// MEMBER records (BulkSetMembers_V161) types them again as they were. Restoring line by line does not do: each
+        /// re-typed line gets a member of its own with a copy of the member's loads (513 lines: +361 members, +258 loads,
+        /// verified 2026-10-23). Typed lines outside any member are restored line by line.
+        /// </summary>
+        private List<int> TakeKeptDiaphragm(string name, List<int> rebuilt, out Action restore, out Action dropOld)
+        {
+            restore = null;
+            dropOld = null;
+            List<string> guids;
+            if (!opt.Diff.KeptDiaphragms.TryGetValue(name, out guids) || guids.Count == 0) return new List<int>();
+
+            if (linesByGuid == null)
+            {
+                linesByGuid = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+                AxisVMAttachments la = TryGet(() => model.Lines.Attachments);
+                int n = SafeLineCount();
+                for (int i = 1; i <= n && la != null; i++)
+                    foreach (string g in LinkState.Guids(la, i))
+                    {
+                        List<int> l;
+                        if (!linesByGuid.TryGetValue(g, out l)) { l = new List<int>(); linesByGuid[g] = l; }
+                        l.Add(i);
+                    }
+            }
+            HashSet<int> members = new HashSet<int>();
+            foreach (string g in guids) { List<int> l; if (linesByGuid.TryGetValue(g, out l)) members.UnionWith(l); }
+            // Kept surfaces in the diaphragm: their domain's edges.
+            AxisVMAttachments da = TryGet(() => model.Domains.Attachments);
+            HashSet<string> keptSet = new HashSet<string>(guids, StringComparer.OrdinalIgnoreCase);
+            int nd = TryCount(() => model.Domains.Count);
+            for (int i = 1; i <= nd && da != null; i++)
+                if (LinkState.Guids(da, i).Exists(keptSet.Contains))
+                {
+                    foreach (int l in LinkState.ContourLines(model, i)) members.Add(l);
+                    foreach (List<int> h in LinkState.HoleLines(model, i)) foreach (int l in h) members.Add(l);
+                }
+
+            List<int> found = new List<int>();
+            HashSet<int> lines = new HashSet<int>();
+            int count = TryCount(() => model.Diaphragm.Count);
+            for (int d = 1; d <= count; d++)
+            {
+                try
+                {
+                    Array arr;
+                    model.Diaphragm.GetLines(d, out arr);
+                    List<int> dl = LinkState.IntList(arr);
+                    if (!dl.Exists(members.Contains)) continue;
+                    found.Add(d);
+                    lines.UnionWith(dl);
+                }
+                catch { }
+            }
+            lines.ExceptWith(rebuilt);
+            if (lines.Count == 0) return new List<int>();
+
+            List<int> keep = new List<int>(lines);
+
+            // What to put back: the members the typed lines are in, and typed lines in no member.
+            var memberRecs = new List<KeyValuePair<int, RLineAttr_V161>>();
+            var lineRecs = new List<KeyValuePair<int, RLineAttr_V161>>();
+            try
+            {
+                Array mids;
+                model.Lines.BulkGetMemberIds(Ids(keep.ToArray()), out mids);
+                List<int> memberOf = LinkState.IntList(mids);
+                HashSet<int> ofLines = new HashSet<int>();
+                for (int k = 0; k < keep.Count && k < memberOf.Count; k++)
+                {
+                    if (memberOf[k] > 0) { ofLines.Add(memberOf[k]); continue; }
+                    RLineAttr_V161 a;
+                    if (TryGetLineAttrV161(keep[k], out a) && LinkState.LineTypeName(a.LineType).Length > 0) lineRecs.Add(new KeyValuePair<int, RLineAttr_V161>(keep[k], a));
+                }
+                if (ofLines.Count > 0)
+                {
+                    List<int> ml = new List<int>(ofLines);
+                    Array recs;
+                    if (model.Members.BulkGetMembers_V161(Ids(ml.ToArray()), out recs) > 0 && recs != null)
+                    {
+                        int lo = recs.GetLowerBound(0);
+                        for (int k = 0; k < ml.Count && k < recs.Length; k++) memberRecs.Add(new KeyValuePair<int, RLineAttr_V161>(ml[k], (RLineAttr_V161)recs.GetValue(lo + k)));
+                    }
+                }
+            }
+            catch { }
+
+            restore = () =>
+            {
+                int failed = 0;
+                if (memberRecs.Count > 0)
+                {
+                    // A fresh array of our own record type (the returned one is only type-equivalent, see TrySetLineAttrV161).
+                    Array ids = Array.CreateInstance(typeof(int), new[] { memberRecs.Count }, new[] { 1 });
+                    Array recs = Array.CreateInstance(typeof(RLineAttr_V161), new[] { memberRecs.Count }, new[] { 1 });
+                    for (int k = 0; k < memberRecs.Count; k++) { ids.SetValue(memberRecs[k].Key, k + 1); recs.SetValue(memberRecs[k].Value, k + 1); }
+                    try { if (model.Members.BulkSetMembers_V161(ids, recs) < memberRecs.Count) failed++; }
+                    catch { failed++; }
+                }
+                foreach (KeyValuePair<int, RLineAttr_V161> kv in lineRecs) if (!TrySetLineAttrV161(kv.Key, kv.Value)) failed++;
+                if (failed > 0) notes.Add("Rigid diaphragm '" + name + "': some members already in it could not be given their type back - check them.");
+            };
+            // Deleted only once the new diaphragm is known to be valid (BuildDiaphragms).
+            dropOld = () => { for (int k = found.Count - 1; k >= 0; k--) { try { model.Diaphragm.Delete(found[k]); } catch { } } };
+            return keep;
         }
 
         /// <summary>

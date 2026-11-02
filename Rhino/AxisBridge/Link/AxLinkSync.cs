@@ -17,7 +17,7 @@ using Rhino.Geometry;
 namespace AxisBridge.Link
 {
     /// <summary>
-    /// The Rhino end of the live link with the AxisVM "Rhino Import" add-on (its "Live link" tab).
+    /// The Rhino end of the live link with the AxisVM "Rhino Import" add-on (From Rhino / To Rhino on one file).
     ///
     /// One JSON file, one section per side:
     ///   { "link": 1,
@@ -232,7 +232,7 @@ namespace AxisBridge.Link
             if (ax == null || sent.Length == 0)
             {
                 res.NothingNew = true;
-                res.Notes.Add("AxisVM has not sent anything to this link file yet (Rhino Import add-on > Live link > Send to Rhino).");
+                res.Notes.Add("AxisVM has not sent anything to this link file yet (Rhino Import add-on > To Rhino > Send to Rhino).");
                 return res;
             }
 

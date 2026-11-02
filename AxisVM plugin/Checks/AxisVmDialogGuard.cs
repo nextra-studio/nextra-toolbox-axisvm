@@ -128,6 +128,10 @@ internal static class AxisVmDialogGuard
             }
             Thread.Sleep(500);
         }
+        // Never leave the instance this check started behind.
+        List<int> left;
+        lock (owned) left = new List<int>(owned);
+        foreach (int pid in left) { try { Process.GetProcessById(pid).Kill(); } catch { } }
         throw new InvalidOperationException("AxisVM did not finish starting, or the NextraAxisVM add-on is not loaded (no '!NextraAxisVM.Host.<pid>' in the running object table).");
     }
 
@@ -178,6 +182,14 @@ internal static class AxisVmDialogGuard
     /// Box folder model), so a check must never take model 1 for granted: it creates its own and picks an empty one, and
     /// refuses to continue when it cannot find one.
     /// </summary>
+    /// <summary>Attaches to an AxisVM that is already running (by pid) through its NextraAxisVM ROT entry; no dialog watching.</summary>
+    public static AxisVM.IAxisVMApplication Attach(int pid)
+    {
+        object host = FromRot("!NextraAxisVM.Host." + pid);
+        if (host == null) throw new InvalidOperationException("No NextraAxisVM host for pid " + pid + " in the running object table.");
+        return (AxisVM.IAxisVMApplication)host.GetType().InvokeMember("GetApplication", System.Reflection.BindingFlags.InvokeMethod, null, host, null);
+    }
+
     public static AxisVM.IAxisVMModel FreshModel(AxisVM.IAxisVMApplication app)
     {
         AxisVM.IAxisVMModels models = app.Models;

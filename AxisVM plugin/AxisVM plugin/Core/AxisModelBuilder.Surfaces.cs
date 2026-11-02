@@ -114,15 +114,22 @@ namespace AxisVM_plugin.Core
             }
 
             int domainId;
+            string refused = null;
             try { domainId = model.Domains.Add(Ids(s.OuterChain.Ids().ToArray()), ref attr); }
-            catch (Exception ex)
-            {
-                notes.Add(string.Format("{0}: AxisVM rejected the domain ({1}). Is its boundary planar and closed?", s.Context, ex.Message));
-                return;
-            }
+            catch (Exception ex) { domainId = 0; refused = ex.Message; }
             if (domainId <= 0)
             {
-                notes.Add(string.Format("{0}: AxisVM rejected the domain (code {1}). Is its boundary planar and closed?", s.Context, domainId));
+                DumpChain(s);
+                // "Only changes": a domain Rhino did not change comes back on its previous outline rather than going missing.
+                int again;
+                if (TryOldOutline(s, out again))
+                {
+                    s.DomainId = again;
+                    stats.DomainsCreated++;
+                    ApplySurfaceSupport(s);
+                    return;
+                }
+                notes.Add(string.Format("{0}: AxisVM rejected the domain ({1}). Is its boundary planar and closed?", s.Context, refused ?? "code " + domainId));
                 return;
             }
 
@@ -150,6 +157,54 @@ namespace AxisVM_plugin.Core
             }
 
             ApplyDomainEccentricity(s);
+            ApplySurfaceSupport(s);
+        }
+
+        /// <summary>Test drivers only (env NEXTRA_DUMP_DOMAINS = folder): the line chain AxisVM refused, one line per segment.</summary>
+        private void DumpChain(SurfaceJob s)
+        {
+            string dir = Environment.GetEnvironmentVariable("NEXTRA_DUMP_DOMAINS");
+            if (string.IsNullOrEmpty(dir)) return;
+            try
+            {
+                var lines = new List<string>();
+                foreach (SegRef r in s.OuterChain.Segs)
+                {
+                    int[] e = LinkState.LineNodes(model, r.Id);
+                    double[] a = e == null ? null : NodeXyz(e[0]), b = e == null ? null : NodeXyz(e[1]);
+                    bool pre = false;
+                    try { pre = preexistingLineUids.Contains(model.Lines.get_UID(r.Id)); } catch { }
+                    lines.Add(string.Format(CultureInfo.InvariantCulture, "{0}\t{1}\t{2}\t{3}\t{4}\t{5}", r.Id, e == null ? 0 : e[0], e == null ? 0 : e[1],
+                        a == null ? "?" : string.Join(",", a), b == null ? "?" : string.Join(",", b), pre ? "kept" : "new"));
+                }
+                System.IO.File.WriteAllLines(System.IO.Path.Combine(dir, "rejected-" + s.Src.Guid + ".txt"), lines);
+            }
+            catch { }
+        }
+
+        /// <summary>Ax_SurfaceSupport: an elastic foundation under the whole domain (kept by AxisVM through meshing).</summary>
+        private void ApplySurfaceSupport(SurfaceJob s)
+        {
+            string text = s.Src.Attr(AxKeys.SurfaceSupport);
+            if (text == null) return;
+            double[] k;
+            string err;
+            if (!AttributeParser.TryParseSurfaceSupport(text, opt.Units, out k, out err))
+            {
+                notes.Add(string.Format("{0}: Ax_SurfaceSupport - {1}. Ignored.", s.Context, err));
+                stats.AttributeErrors++;
+                return;
+            }
+            try
+            {
+                RStiffnessesXYZ kf = new RStiffnessesXYZ { x = k[0], y = k[1], z = k[2] };
+                RNonLinearityXYZ nl = new RNonLinearityXYZ();
+                RResistancesXYZ rs = new RResistancesXYZ();
+                int rc = model.Domains.Item[s.DomainId].SetElasticFoundation(ref kf, ref nl, ref rs);
+                if (rc > 0) stats.SurfaceSupportsCreated++;
+                else notes.Add(string.Format("{0}: AxisVM rejected the surface support (code {1}).", s.Context, rc));
+            }
+            catch (Exception ex) { notes.Add(string.Format("{0}: its surface support could not be set ({1}).", s.Context, ex.Message)); }
         }
 
         private void ApplyDomainEccentricity(SurfaceJob s)

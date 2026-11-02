@@ -38,7 +38,12 @@ namespace AxisVM_plugin.Core
         public const string HingeDomains = "Ax_HingeDomains";
         public const string CoupledDof = "Ax_CoupledDOF";
 
+        /// <summary>Line-to-line link: on the slave curve, the Rhino id of the master curve (stiffness from Ax_Stiffness, rigid when absent).</summary>
+        public const string LineLink = "Ax_LineLink";
+
         // Domain
+        /// <summary>Surface elastic foundation on a domain: "kz" or "kx,ky,kz" (kN/m/m²).</summary>
+        public const string SurfaceSupport = "Ax_SurfaceSupport";
         public const string FeType = "Ax_FEType";
         public const string Thickness = "Ax_Thickness";
         public const string SpanDirection = "Ax_SpanDirection";
@@ -58,8 +63,8 @@ namespace AxisVM_plugin.Core
         {
             Guid, Parts, Diaphragm,
             Support, NodalLoad,
-            Type, Material, Section, Release, LocalAxis, Eccentricity, PointLoad, DistLoad, Stiffness, HingeDomains, CoupledDof,
-            FeType, Thickness, SpanDirection, EdgeSpacing, SpanTolerance, LoadTargets
+            Type, Material, Section, Release, LocalAxis, Eccentricity, PointLoad, DistLoad, Stiffness, HingeDomains, CoupledDof, LineLink,
+            FeType, Thickness, SpanDirection, EdgeSpacing, SpanTolerance, LoadTargets, SurfaceSupport
         };
 
         /// <summary>

@@ -14,6 +14,7 @@ Choose a tool by the task you want to perform. Select objects in AxisVM before o
 | ![Reaction transfer](../images/icons/ReactionTransfer@4x.png) | [Reaction transfer](reaction-transfer.md) | Turn support reactions into point loads in a target model. |
 | ![Section modifier](../images/icons/SectionModifier@4x.png) | [Section modifier](section-modifier.md) | Set rectangular section width and depth. |
 | ![Connection loads](../images/icons/ConnectionLoadExtractor@4x.png) | [Connection loads](connection-loads.md) | Extract concurrent forces and moments for governing combinations. |
+| ![Timber SLS check](../images/icons/TimberSls@4x.png) | [Timber SLS check (WIP)](timber-sls.md) | Timber deflection (EC5, NL NA / Harff) and floor vibration (EC5:2004 or 2025) for floor and roof members. |
 <!-- /gen:tools-guide -->
 
 A menu entry marked **(WIP)** is a tool still in development. Released tools carry no label.

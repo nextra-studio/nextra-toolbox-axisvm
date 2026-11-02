@@ -20,7 +20,7 @@ namespace AxisBridge.UI
         public static readonly string[] ScalarKeys =
         {
             AxKeys.FeType, AxKeys.Material, AxKeys.Thickness, AxKeys.LocalAxis, AxKeys.Eccentricity,
-            AxKeys.SpanDirection, AxKeys.EdgeSpacing, AxKeys.SpanTolerance, AxKeys.LoadTargets, AxKeys.Parts
+            AxKeys.SpanDirection, AxKeys.EdgeSpacing, AxKeys.SpanTolerance, AxKeys.LoadTargets, AxKeys.SurfaceSupport, AxKeys.Parts
         };
         public static readonly string[] FamilyKeys = { AxKeys.DistLoad, AxKeys.PointLoad };
 
@@ -34,6 +34,7 @@ namespace AxisBridge.UI
         private PanelPreview preview;
         private readonly TextField edgeSpacing;
         private readonly TextField spanTolerance;
+        private readonly TextField surfaceSupport;
         private readonly TextField parts;
 
         private readonly TabPage pageDomain, pagePanel, pageLoads, pageParts;
@@ -58,6 +59,10 @@ namespace AxisBridge.UI
             dom.Add("Local x reference", localAxis.Control, "Blank = AxisVM automatic, or a direction vector such as 1,0,0.");
             eccentricity = Track(new TextField(AxKeys.Eccentricity, "none"));
             dom.Add("Eccentricity", eccentricity.Control, "Offset of the mid-plane along the surface normal, in " + DocUnitName + " (for a flat slab the z value is used, e.g. 0,0,-100).");
+            dom.Section("Surface support");
+            surfaceSupport = Track(new TextField(AxKeys.SurfaceSupport, "none"));
+            dom.Add("Elastic foundation", surfaceSupport.Control,
+                "Winkler bedding under the whole domain in kN/m/m²: one value = kz (perpendicular), or kx, ky, kz in the domain's local axes. A plate takes kz only.");
             pageDomain = AddPage("Domain", dom);
 
             // ---- Load panel ---------------------------------------------------
@@ -173,6 +178,7 @@ namespace AxisBridge.UI
             targets.Load(State.Get(AxKeys.LoadTargets), "", fresh);
             edgeSpacing.Load(State.Get(AxKeys.EdgeSpacing), "", fresh);
             spanTolerance.Load(State.Get(AxKeys.SpanTolerance), "", fresh);
+            surfaceSupport.Load(State.Get(AxKeys.SurfaceSupport), "", fresh);
             parts.Load(State.Get(AxKeys.Parts), "", fresh);
         }
 
@@ -218,6 +224,11 @@ namespace AxisBridge.UI
                 if (!double.TryParse(spanTolerance.Value.Replace(',', '.'), System.Globalization.NumberStyles.Float,
                                      System.Globalization.CultureInfo.InvariantCulture, out tol) || tol < 0 || tol >= 45)
                     return "The angle tolerance must be from 0 up to, but below, 45 degrees (blank = 5).";
+            }
+            if (CurrentType != null && !AxSchema.IsLoadPanel(CurrentType) && surfaceSupport.Touched && surfaceSupport.Value.Trim().Length > 0 && surfaceSupport.Value != "-")
+            {
+                int n = surfaceSupport.Value.Split(',').Length;
+                if (n != 1 && n != 3) return "Elastic foundation: one value (kz) or three (kx, ky, kz), in kN/m/m².";
             }
             if (CurrentType != null && !AxSchema.IsLoadPanel(CurrentType) && thickness.Touched && thickness.Value != "-")
             {

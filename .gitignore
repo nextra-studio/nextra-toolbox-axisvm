@@ -51,3 +51,7 @@ __pycache__/
 Checks/calibration/
 
 dist/
+
+# third-party reference PDFs (copyrighted), keep local
+AxisVM plugin/docs/reference/NEN-EN 1995-1-1+C1+A1_2011 nl-unlocked.pdf
+AxisVM plugin/docs/reference/Timber_deflectionEC5__SLS.pdf

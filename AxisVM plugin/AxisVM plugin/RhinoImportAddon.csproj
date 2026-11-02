@@ -66,6 +66,10 @@
     <Compile Include="Core\AxisModelBuilder.Loads.cs" />
     <Compile Include="Core\AxisModelBuilder.Helpers.cs" />
     <Compile Include="Core\AxisModelBuilder.Link.cs" />
+    <Compile Include="Core\AxisModelBuilder.Diff.cs" />
+    <Compile Include="Core\LinkSignature.cs" />
+    <Compile Include="Core\LinkLoader.cs" />
+    <Compile Include="Core\LinkExtras.cs" />
     <Compile Include="Core\LinkFile.cs" />
     <Compile Include="Core\LinkState.cs" />
     <Compile Include="Core\LinkLibrary.cs" />

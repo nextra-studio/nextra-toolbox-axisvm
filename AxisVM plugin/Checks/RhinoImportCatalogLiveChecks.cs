@@ -70,9 +70,7 @@ internal static class RhinoImportCatalogLiveChecks
             var opt = new ImportOptions { Units = new AxUnits { LengthToM = 1.0, LengthName = "m" }, MergeToleranceM = 0.001, AutoIntersect = false, SourcePath = jsonPath };
             var builder = new AxisModelBuilder(app, model, rhino, opt, notes);
             var clock = System.Diagnostics.Stopwatch.StartNew();
-            model.BeginUpdate();
-            try { builder.Run(); }
-            finally { model.EndUpdate(); }
+            builder.Run();
             Console.WriteLine("      imported in " + clock.Elapsed.TotalSeconds.ToString("0.0") + " s, " + model.Lines.Count + " lines");
 
             Verify(model, rhino, notes, axisDir);
@@ -111,8 +109,7 @@ internal static class RhinoImportCatalogLiveChecks
             var opt = new ImportOptions { Units = new AxUnits { LengthToM = 0.001, LengthName = "mm" }, MergeToleranceM = 0.001, AutoIntersect = true, SourcePath = jsonPath };
             var builder = new AxisModelBuilder(app, model, rhino, opt, notes);
             var clock = System.Diagnostics.Stopwatch.StartNew();
-            model.BeginUpdate();
-            try { builder.Run(); } finally { model.EndUpdate(); }
+            builder.Run();
             Console.WriteLine("      imported in " + clock.Elapsed.TotalSeconds.ToString("0.0") + " s");
 
             ImportStats st = builder.Stats;

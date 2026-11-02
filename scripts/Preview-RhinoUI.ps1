@@ -11,7 +11,7 @@ $temp = Join-Path ([IO.Path]::GetTempPath()) ('nextra-rhino-preview-' + [guid]::
 New-Item -ItemType Directory $temp | Out-Null
 Copy-Item "$bin\AxisBridge.rhp", "$bin\Newtonsoft.Json.dll" $temp
 Copy-Item "$bin\AxisBridge.rhp" (Join-Path $temp 'AxisBridge.dll')  # so the runtime can resolve the assembly by name
-$rc = Join-Path $env:USERPROFILE '.nuget\packages\rhinocommon\8.6.24101.5001\lib\net48'
+$rc = Join-Path $env:USERPROFILE '.nuget\packages\rhinocommon\8.0.23304.9001\lib\net48'
 Copy-Item "$rc\RhinoCommon.dll", "$rc\Rhino.UI.dll", "$rc\Eto.dll" $temp
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $exe = Join-Path $temp 'RhinoUiPreview.exe'

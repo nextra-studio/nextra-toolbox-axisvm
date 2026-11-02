@@ -57,10 +57,11 @@ namespace AxisBridge.Attributes
         private static readonly Dictionary<string, HashSet<string>> LineKeys =
             new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
             {
-                { Beam,      Set(AxKeys.Type, AxKeys.Material, AxKeys.Section, AxKeys.Release, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.Parts, AxKeys.Diaphragm) },
-                { Rib,       Set(AxKeys.Type, AxKeys.Material, AxKeys.Section, AxKeys.Release, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.Support, AxKeys.Parts, AxKeys.Diaphragm) },
+                // Ax_Support on a beam or rib = an elastic foundation along it; Ax_LineLink + Ax_Stiffness = a line-to-line link.
+                { Beam,      Set(AxKeys.Type, AxKeys.Material, AxKeys.Section, AxKeys.Release, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.Support, AxKeys.LineLink, AxKeys.Stiffness, AxKeys.Parts, AxKeys.Diaphragm) },
+                { Rib,       Set(AxKeys.Type, AxKeys.Material, AxKeys.Section, AxKeys.Release, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.Support, AxKeys.LineLink, AxKeys.Stiffness, AxKeys.Parts, AxKeys.Diaphragm) },
                 // A truss is axial only: no releases, no orientation and no member loads in AxisVM.
-                { Truss,     Set(AxKeys.Type, AxKeys.Material, AxKeys.Section, AxKeys.Parts, AxKeys.Diaphragm) },
+                { Truss,     Set(AxKeys.Type, AxKeys.Material, AxKeys.Section, AxKeys.LineLink, AxKeys.Stiffness, AxKeys.Parts, AxKeys.Diaphragm) },
                 { Spring,    Set(AxKeys.Type, AxKeys.Stiffness, AxKeys.Parts) },
                 { RigidLink, Set(AxKeys.Type, AxKeys.Parts) },
                 { NodeLink,  Set(AxKeys.Type, AxKeys.CoupledDof, AxKeys.Parts) },
@@ -71,9 +72,9 @@ namespace AxisBridge.Attributes
         private static readonly Dictionary<string, HashSet<string>> SurfaceKeys =
             new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
             {
-                { Shell,           Set(AxKeys.FeType, AxKeys.Material, AxKeys.Thickness, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.Parts, AxKeys.Diaphragm) },
-                { Plate,           Set(AxKeys.FeType, AxKeys.Material, AxKeys.Thickness, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.Parts, AxKeys.Diaphragm) },
-                { Membrane,        Set(AxKeys.FeType, AxKeys.Material, AxKeys.Thickness, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.Parts, AxKeys.Diaphragm) },
+                { Shell,           Set(AxKeys.FeType, AxKeys.Material, AxKeys.Thickness, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.SurfaceSupport, AxKeys.Parts, AxKeys.Diaphragm) },
+                { Plate,           Set(AxKeys.FeType, AxKeys.Material, AxKeys.Thickness, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.SurfaceSupport, AxKeys.Parts, AxKeys.Diaphragm) },
+                { Membrane,        Set(AxKeys.FeType, AxKeys.Material, AxKeys.Thickness, AxKeys.LocalAxis, AxKeys.Eccentricity, AxKeys.PointLoad, AxKeys.DistLoad, AxKeys.SurfaceSupport, AxKeys.Parts, AxKeys.Diaphragm) },
                 // A load panel is NOT a domain in AxisVM: no material, thickness, axis, eccentricity or parts.
                 { LoadPanel,       Set(AxKeys.FeType, AxKeys.LoadTargets, AxKeys.PointLoad, AxKeys.DistLoad) },
                 { OneWayLoadPanel, Set(AxKeys.FeType, AxKeys.SpanDirection, AxKeys.EdgeSpacing, AxKeys.SpanTolerance, AxKeys.PointLoad, AxKeys.DistLoad) },

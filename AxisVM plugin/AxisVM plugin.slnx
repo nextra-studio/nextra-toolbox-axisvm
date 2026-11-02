@@ -7,4 +7,6 @@
   <Project Path="AxisVM plugin/ReactionTransferAddon.csproj" Id="b710d6ef-058c-4dbb-9760-0e8576fa579e" />
   <Project Path="AxisVM plugin/RhinoImportAddon.csproj" Id="9e4b8c1a-2d3f-4a5b-8c7e-1f2a3b4c5d6e" />
   <Project Path="AxisVM plugin/SectionModifierAddon.csproj" Id="b710d6ef-058c-4dbb-9760-0e8576fa579b" />
+  <Project Path="AxisVM plugin/TimberSlsAddon.csproj" Id="6e2b9a41-7c3d-4f58-a1e2-93b4c5d6e7f8" />
+  <Project Path="Checks/TimberSlsMathChecks.csproj" Id="5a1c7e3b-9d2f-4b6a-8e41-2c7d9f0b3a64" />
 </Solution>

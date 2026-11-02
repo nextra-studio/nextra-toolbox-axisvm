@@ -82,7 +82,20 @@ namespace AxisVM_plugin.Core
         {
             string key = LinkKey(jsonPath);
             if (model == null || key.Length == 0) return new LinkedItems();
-            try { return Linked(model, key, null, null).Counts(); }
+            // As the load counts them: also what "Send to Rhino" adopted and Rhino has loaded since (an AxisVM-first link).
+            HashSet<string> knows = null;
+            Dictionary<string, string> panels = null;
+            try
+            {
+                if (File.Exists(jsonPath))
+                {
+                    JsonValue root = LinkFile.Read(jsonPath);
+                    knows = LinkFile.RhinoKnownGuids(root);
+                    panels = RhinoLinkSender.AdoptedPanels(root);
+                }
+            }
+            catch { knows = null; panels = null; }
+            try { return Linked(model, key, knows, panels).Counts(); }
             catch { return new LinkedItems(); }
         }
 
@@ -177,6 +190,8 @@ namespace AxisVM_plugin.Core
         /// </summary>
         private void RemovePrevious()
         {
+            if (opt.Diff != null && !opt.Diff.Everything) { RemovePlanned(); return; }
+
             string key = LinkKey(opt.SourcePath);
             if (key.Length == 0) return;
 
@@ -200,7 +215,71 @@ namespace AxisVM_plugin.Core
                 stats.Replaced = counts;
                 return;
             }
+            RemoveFound(old, counts);
+        }
 
+        /// <summary>"Only changes": deletes what LinkDiff planned, after recording what AxisVM added to it (see CarryOver).</summary>
+        private void RemovePlanned()
+        {
+            LinkDiffPlan p = opt.Diff;
+            LinkedUids old = new LinkedUids();
+            old.Lines.AddRange(p.LineUids);
+            old.Nodes.AddRange(p.NodeUids);
+            old.Domains.AddRange(p.DomainUids);
+            old.LoadPanels.AddRange(p.PanelUids);
+            old.Parts.AddRange(p.PartIds);
+            LinkedItems counts = old.Counts();
+            stats.Replaced = counts;
+            if (opt.DryRun || counts.Total == 0) return;
+
+            HashSet<int> touched = new HashSet<int>(p.LineUids);
+            touched.UnionWith(p.CleanLineUids);
+            RememberCarried(touched, new HashSet<int>(p.DomainUids), new HashSet<int>(p.NodeUids), p.RhinoSupportLineUids, p.RhinoHingeLines, new HashSet<int>(p.SupportNodeUids));
+            RememberOldDomains(new HashSet<int>(p.DomainUids));
+            DeleteNodalSupports(p.SupportNodeUids);
+            CleanLines(p.CleanLineUids);
+            RemoveFound(old, counts);
+        }
+
+        /// <summary>
+        /// Edge connections and line supports on kept lines a rebuilt edge hinge / plain line runs along: the rebuild makes
+        /// Rhino's again (AxisVM's own were recorded for carrying over first).
+        /// </summary>
+        private void CleanLines(HashSet<int> lineUids)
+        {
+            if (lineUids.Count == 0) return;
+            int[] uid = LineUids();
+            Func<int, bool> clean = line => line >= 1 && line <= uid.Length && lineUids.Contains(uid[line - 1]);
+            for (int i = TryCount(() => model.EdgeConnections.Count); i >= 1; i--)
+            {
+                try
+                {
+                    REdgeConnectionRec_V172 rec = new REdgeConnectionRec_V172();
+                    if (model.EdgeConnections.GetRec_V172(i, ref rec) > 0 && clean(rec.LineId)) model.EdgeConnections.Delete(i);
+                }
+                catch { }
+            }
+            for (int i = TryCount(() => model.LineSupports.Count); i >= 1; i--)
+            {
+                try { if (clean(model.LineSupports.get_LineId(i))) model.LineSupports.Delete(i); } catch { }
+            }
+        }
+
+        /// <summary>The nodal supports on these nodes (Rhino's, about to be rebuilt with their point).</summary>
+        private void DeleteNodalSupports(List<int> nodeUids)
+        {
+            if (nodeUids.Count == 0) return;
+            HashSet<int> at = new HashSet<int>();
+            foreach (int uid in nodeUids) { try { int i = model.Nodes.get_IndexOfUID(uid); if (i > 0) at.Add(i); } catch { } }
+            for (int s = TryCount(() => model.NodalSupports.Count); s >= 1; s--)
+            {
+                try { if (at.Contains(model.NodalSupports.Item[s].NodeId)) model.NodalSupports.Delete(s); } catch { }
+            }
+        }
+
+        /// <summary>Deletes what an earlier import left (or what LinkDiff planned): see RemovePrevious.</summary>
+        private void RemoveFound(LinkedUids old, LinkedItems counts)
+        {
             // The end nodes of the lines about to go: those an adoption brought in carry no mark of
             // their own, and are deleted below too when nothing else uses them.
             // Everything is read in bulk and deleted in one go per kind: item-by-item calls made an update of a large
@@ -265,7 +344,7 @@ namespace AxisVM_plugin.Core
             DeleteNodalLoads(keptNodes);
 
             stats.Replaced = counts;
-            if (kept > 0)
+            if (kept > 0 && opt.Diff == null)
                 notes.Add(string.Format("Update: {0} node(s) of the earlier import are also used by lines drawn in AxisVM and were kept.", kept));
         }
 

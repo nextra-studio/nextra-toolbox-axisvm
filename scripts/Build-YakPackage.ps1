@@ -3,7 +3,7 @@
 [CmdletBinding()]
 param(
     [string]$Yak = 'C:\Program Files\Rhino 8\System\Yak.exe',
-    [string]$Version = '1.0.1'
+    [string]$Version = '1.0.2'
 )
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')

@@ -10,19 +10,18 @@ using AxisVM_plugin.UI;
 namespace AxisVM_plugin.Functions
 {
     /// <summary>
-    /// Drives one Rhino import: collect settings, read the export, build the model, report what happened.
+    /// Drives the Rhino dialog: "Load from Rhino" (build or update this model from an AxExport or AxLink file) and
+    /// "Send to Rhino" (write what changed in AxisVM into the link file), and reports what happened.
     ///
-    /// The whole build runs inside a single BeginUpdate / EndUpdate pair preceded by SaveUndo, which is
-    /// the pattern the other addons use and the reason one Ctrl+Z backs the entire import out. That
-    /// matters more here than anywhere else in this repo: an import touches every collection in the
-    /// model at once, and a half-finished one is not something a user can unpick by hand.
+    /// A load is preceded by one SaveUndo, the reason one Ctrl+Z backs the whole load out. That matters more here than
+    /// anywhere else in this repo: a load touches every collection in the model at once, and a half-finished one is not
+    /// something a user can unpick by hand. The builder holds BeginUpdate / EndUpdate itself (see AxisModelBuilder.Run).
     /// </summary>
     public static class RhinoImportLogic
     {
-        /// <summary>Remembered between runs so re-importing after a Rhino edit is two clicks.</summary>
+        /// <summary>Remembered between runs so loading again after a Rhino edit is two clicks.</summary>
         private static string lastPath = "";
-        private static string lastLinkPath = "";
-        private static bool lastOnLink;
+        private static bool lastSend;
 
         public static int Execute(IAxisVMApplication app)
         {
@@ -40,23 +39,14 @@ namespace AxisVM_plugin.Functions
                     CatalogExport.Result r = CatalogExport.Export(app, CatalogExport.DefaultFolder());
                     return string.Format("{0} materials and {1} cross-sections in {2} tables written to\r\n{3}", r.Materials, r.Sections, r.Tables, r.Folder);
                 };
-
                 Func<string, LinkedItems> findLinked = path => AxisModelBuilder.FindLinked(model, path);
 
-                using (RhinoImportForm form = new RhinoImportForm(lastPath, exportCatalog, findLinked, lastLinkPath, lastOnLink))
+                using (RhinoImportForm form = new RhinoImportForm(lastPath, exportCatalog, findLinked, lastSend))
                 {
                     if (form.ShowDialog() != DialogResult.OK) return 1;
-
-                    lastOnLink = form.Action != RhinoImportForm.FormAction.Import;
-                    if (lastOnLink) lastLinkPath = form.LinkPath;
-                    else lastPath = form.JsonPath;
-
-                    switch (form.Action)
-                    {
-                        case RhinoImportForm.FormAction.LoadFromRhino: return LoadFromRhino(app, model, form);
-                        case RhinoImportForm.FormAction.SendToRhino: return SendToRhino(model, form.LinkPath);
-                        default: return RunImport(app, model, form, form.JsonPath, form.ReplacePrevious, form.DryRun, null);
-                    }
+                    lastPath = form.FilePath;
+                    lastSend = form.Action == RhinoImportForm.FormAction.SendToRhino;
+                    return lastSend ? SendToRhino(model, form.FilePath) : Load(app, model, form);
                 }
             }
             catch (Exception ex)
@@ -67,44 +57,68 @@ namespace AxisVM_plugin.Functions
         }
 
         // ==================================================================
-        // Live link
+        // From Rhino
         // ==================================================================
 
-        /// <summary>
-        /// "Load from Rhino": an update import of the link file's Rhino section, after which the axisvm
-        /// section records that AxisVM is in line with that send (and what it built).
-        /// </summary>
-        private static int LoadFromRhino(IAxisVMApplication app, IAxisVMModel model, RhinoImportForm form)
+        private static int Load(IAxisVMApplication app, IAxisVMModel model, RhinoImportForm form)
         {
-            string path = form.LinkPath;
+            string path = form.FilePath;
             JsonValue root;
             try { root = LinkFile.Read(path); }
             catch (Exception ex)
             {
-                MessageBox.Show("The link file could not be read:\r\n\r\n" + ex.Message, "Live link", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("The file could not be read:\r\n\r\n" + ex.Message, "Rhino Import", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 0;
             }
 
             LinkFile.Status status = LinkFile.ReadStatus(root);
-            if (status.AxisVmPending &&
+            if (form.ReplacePrevious && !form.DryRun && status.AxisVmPending &&
                 MessageBox.Show(string.Format(
                     "AxisVM sent {0} change(s) at {1} that Rhino has not loaded yet.\r\n\r\n" +
-                    "Loading Rhino's model now replaces them with Rhino's version - they are lost unless Rhino loads them first " +
-                    "(AxLink > Load from AxisVM).\r\n\r\nLoad from Rhino anyway?", status.AxisVmChanges, LinkFile.Local(status.AxisVmSent)),
-                    "Live link", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                    (form.OnlyChanges
+                        ? "Elements Rhino did not change keep their AxisVM version; elements Rhino changed too are rebuilt from Rhino's version. "
+                        : "Loading replaces them with Rhino's version. ") +
+                    "To keep every AxisVM change, let Rhino load them first (AxLink > Load from AxisVM).\r\n\r\nLoad from Rhino anyway?",
+                    status.AxisVmChanges, LinkFile.Local(status.AxisVmSent)),
+                    "Rhino Import", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
                 return 1;
 
-            int rc = RunImport(app, model, form, path, true, false, LinkFile.RhinoKnownGuids(root), RhinoLinkSender.AdoptedPanels(root));
-            if (rc != 1) return rc;
-
-            try { RhinoLinkSender.MarkLoaded(model, path, LinkFile.Get(root[LinkFile.RhinoSection], "sent")); }
+            ImportOptions opt = new ImportOptions
+            {
+                Units = form.Units,
+                MergeToleranceM = form.ToleranceM,
+                DryRun = form.DryRun,
+                AutoIntersect = form.AutoIntersect,
+                RemeshRebuilt = form.RemeshRebuilt
+            };
+            List<string> notes = new List<string>();
+            LinkLoadResult result;
+            try
+            {
+                if (!opt.DryRun)
+                {
+                    try { model.SaveUndo(form.ReplacePrevious ? "Rhino update" : "Rhino import"); }
+                    catch { notes.Add("An undo step could not be recorded before the load."); }
+                }
+                try { result = LinkLoader.Load(app, model, path, opt, form.ReplacePrevious, form.OnlyChanges, notes); }
+                finally
+                {
+                    try { model.Refresh(); } catch { }
+                }
+            }
             catch (Exception ex)
             {
-                MessageBox.Show("The model was updated, but the link file could not be marked as loaded:\r\n\r\n" + ex.Message,
-                    "Live link", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Loading from Rhino failed:\r\n\r\n" + ex.Message, "Rhino Import", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return 0;
             }
+
+            ShowReport(result, notes);
             return 1;
         }
+
+        // ==================================================================
+        // To Rhino
+        // ==================================================================
 
         private static int SendToRhino(IAxisVMModel model, string path)
         {
@@ -115,7 +129,7 @@ namespace AxisVM_plugin.Functions
                     LinkFile.Status status = LinkFile.ReadStatus(LinkFile.Read(path));
                     if (status.RhinoNewer && status.AxisVmBasedOnRhino.Length > 0 &&
                         MessageBox.Show("Rhino has sent a newer model that this AxisVM has not loaded yet. Rhino will apply only what you " +
-                                        "changed here on top of it.\r\n\r\nSend anyway?", "Live link",
+                                        "changed here on top of it.\r\n\r\nSend anyway?", "Rhino Import",
                                         MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                         return 1;
                 }
@@ -129,7 +143,7 @@ namespace AxisVM_plugin.Functions
                 sb.AppendLine("Sent to Rhino");
                 sb.AppendLine(string.Format("  changed      {0}", r.Changed));
                 sb.AppendLine(string.Format("  unchanged    {0}", r.Unchanged));
-                sb.AppendLine(string.Format("  new          {0}   (drawn in AxisVM - Rhino creates them)", r.Adopted));
+                sb.AppendLine(string.Format("  new          {0}   (drawn in AxisVM - Rhino creates them, with ids both sides keep)", r.Adopted));
                 sb.AppendLine(string.Format("  deleted      {0}", r.Deleted));
                 sb.AppendLine();
                 sb.AppendLine("Library (always sent in full; Rhino adds what it lacks)");
@@ -141,97 +155,35 @@ namespace AxisVM_plugin.Functions
                 sb.AppendLine();
                 sb.AppendLine("In Rhino: AxLink > Load from AxisVM.");
 
-                string headline = r.Changed + r.Deleted > 0
-                    ? string.Format("{0} change(s) are ready for Rhino.", r.Changed + r.Deleted)
+                string headline = r.Changed + r.Deleted + r.Adopted > 0
+                    ? string.Format("{0} change(s) are ready for Rhino.", r.Changed + r.Deleted + r.Adopted)
                     : "Nothing was changed in AxisVM since the last load from Rhino.";
-                using (RhinoImportReportForm report = new RhinoImportReportForm("Live link", headline, sb.ToString()))
+                using (RhinoImportReportForm report = new RhinoImportReportForm("Send to Rhino", headline, sb.ToString()))
                     report.ShowDialog();
                 return 1;
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Sending to Rhino failed:\r\n\r\n" + ex.Message, "Live link", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Sending to Rhino failed:\r\n\r\n" + ex.Message, "Rhino Import", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 0;
             }
-        }
-
-        // ==================================================================
-        // Import
-        // ==================================================================
-
-        private static int RunImport(IAxisVMApplication app, IAxisVMModel model, RhinoImportForm form,
-                                     string jsonPath, bool replacePrevious, bool dryRun, HashSet<string> rhinoKnownGuids,
-                                     Dictionary<string, string> adoptedPanels = null)
-        {
-            List<string> notes = new List<string>();
-
-            // ---- read ----------------------------------------------------
-            RhinoModel rhino;
-            try
-            {
-                string text = File.ReadAllText(jsonPath);
-                rhino = RhinoModel.FromJson(JsonValue.Parse(text), notes);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("The export could not be read:\r\n\r\n" + ex.Message,
-                    "Rhino Import", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return 0;
-            }
-
-            foreach (string w in rhino.ExportWarnings)
-                notes.Add("Rhino export warning: " + w);
-
-            ImportOptions opt = new ImportOptions
-            {
-                Units = form.Units,
-                MergeToleranceM = form.ToleranceM,
-                DryRun = dryRun,
-                AutoIntersect = form.AutoIntersect,
-                ReplacePrevious = replacePrevious,
-                RhinoKnownGuids = rhinoKnownGuids,
-                AdoptedPanels = adoptedPanels,
-                RemeshRebuilt = form.RemeshRebuilt,
-                SourcePath = jsonPath
-            };
-
-            AxisModelBuilder builder = new AxisModelBuilder(app, model, rhino, opt, notes);
-
-            // ---- build ---------------------------------------------------
-            if (opt.DryRun)
-            {
-                // Nothing is written, so there is nothing to wrap or undo.
-                builder.Run();
-            }
-            else
-            {
-                try { model.SaveUndo(opt.ReplacePrevious ? "Rhino update" : "Rhino import"); }
-                catch { notes.Add("An undo step could not be recorded before the import."); }
-
-                model.BeginUpdate();
-                try
-                {
-                    builder.Run();
-                }
-                finally
-                {
-                    model.EndUpdate();
-                    try { model.Refresh(); } catch { }
-                }
-            }
-
-            ShowReport(rhino, opt, builder.Stats, notes);
-            return 1;
         }
 
         // ==================================================================
         // Reporting
         // ==================================================================
 
-        private static void ShowReport(RhinoModel rhino, ImportOptions opt, ImportStats stats, List<string> notes)
+        private static void ShowReport(LinkLoadResult result, List<string> notes)
         {
+            RhinoModel rhino = result.Rhino;
+            ImportOptions opt = result.Options;
+            ImportStats stats = result.Stats;
+            LinkDiffPlan plan = result.Plan;
+            bool partial = plan != null && !plan.Everything;
+
             string headline = opt.DryRun
                 ? "Dry run - nothing was written to the model."
+                : partial ? (plan.Build.Count + plan.Deleted == 0 ? "Nothing changed in Rhino - the model was left as it is." : "Updated what changed in Rhino.")
                 : stats.Replaced != null ? "Update finished." : "Import finished.";
 
             if (stats.AttributeErrors > 0)
@@ -250,15 +202,23 @@ namespace AxisVM_plugin.Functions
             sb.AppendLine(string.Format("  merge tol.   {0:0.###} mm", opt.MergeToleranceM * 1000.0));
             sb.AppendLine();
 
-            sb.AppendLine("Read from the export");
+            sb.AppendLine("Read from the file");
             sb.AppendLine(string.Format("  points       {0}", rhino.Points.Count));
             sb.AppendLine(string.Format("  lines        {0}", rhino.Lines.Count));
             sb.AppendLine(string.Format("  surfaces     {0}", rhino.Domains.Count));
             sb.AppendLine();
 
+            if (plan != null)
+            {
+                sb.AppendLine("Only what changed");
+                sb.AppendLine("  " + plan.Summary());
+                if (partial && plan.Trace.Length > 0) sb.AppendLine("  rebuilt set: " + plan.Trace);
+                sb.AppendLine();
+            }
+
             if (stats.Replaced != null)
             {
-                sb.AppendLine(opt.DryRun ? "Would replace (from the earlier import of this file)" : "Replaced (from the earlier import of this file)");
+                sb.AppendLine(opt.DryRun ? "Would replace (from the earlier load of this file)" : "Replaced (from the earlier load of this file)");
                 sb.AppendLine("  " + stats.Replaced);
                 sb.AppendLine();
             }
@@ -298,7 +258,7 @@ namespace AxisVM_plugin.Functions
             {
                 sb.AppendLine();
                 sb.AppendLine(stats.Replaced != null
-                    ? "One Ctrl+Z in AxisVM undoes this whole update (the earlier import comes back)."
+                    ? "One Ctrl+Z in AxisVM undoes this whole update."
                     : "One Ctrl+Z in AxisVM undoes this whole import.");
             }
 

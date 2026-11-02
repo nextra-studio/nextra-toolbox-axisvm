@@ -15,7 +15,7 @@ namespace AxisBridge.Visualize
     /// <summary>What the AxVisualize overlay shows. One instance is shared by the window and the conduit.</summary>
     public class VisualSettings
     {
-        public bool Info = true;
+        public bool Info;
         public bool Supports = true;
         public bool Releases = true;
         public bool Loads = true;
@@ -27,9 +27,9 @@ namespace AxisBridge.Visualize
         /// <summary>The one load case drawn, or null for none.</summary>
         public string LoadCase;
 
-        public double SymbolScale = 1.0;
-        public double ArrowScale = 1.0;
-        public int LabelSize = 12;
+        public double SymbolScale = 0.35;
+        public double ArrowScale = 0.35;
+        public int LabelSize = 5;
 
         /// <summary>Element types (Beam, Plate, Node, ...) the user unticked; nothing is drawn for them.</summary>
         public readonly HashSet<string> HiddenTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -67,6 +67,7 @@ namespace AxisBridge.Visualize
         private static readonly Color AreaLoadColor = Color.FromArgb(0, 140, 160);
         private static readonly Color MomentColor = Color.FromArgb(140, 60, 200);
         private static readonly Color SpanColor = Color.FromArgb(0, 110, 220);
+        private static readonly Color LinkColor = Color.FromArgb(120, 60, 180);
 
         private static Mesh unitSphere, unitBox, unitDisc;
 
@@ -171,6 +172,12 @@ namespace AxisBridge.Visualize
             public List<string> Other = new List<string>();
             public string Support;
             public string Release;
+            /// <summary>Ax_SurfaceSupport of a domain (elastic foundation), or null.</summary>
+            public string SurfaceSupport;
+            /// <summary>Ax_LineLink: the master curve's id, and its item once resolved.</summary>
+            public string LinkTo;
+            public Item LinkMaster;
+            public List<List<Point3d>> SupportOutlines;
             public List<LoadItem> Loads = new List<LoadItem>();
             public List<Line> Spans = new List<Line>();
             public List<List<Point3d>> Outlines;
@@ -240,6 +247,12 @@ namespace AxisBridge.Visualize
 
                 it.Support = Get(attrs, AxKeys.Support);
                 if (it.Crv != null) it.Release = Get(attrs, AxKeys.Release);
+                if (it.Crv != null) it.LinkTo = Get(attrs, AxKeys.LineLink);
+                if (it.Surface)
+                {
+                    it.SurfaceSupport = Get(attrs, AxKeys.SurfaceSupport);
+                    if (it.SurfaceSupport != null) it.SupportOutlines = SpanTools.Outlines(obj, tol);
+                }
 
                 ReadLoads(obj, attrs, it);
 
@@ -260,6 +273,15 @@ namespace AxisBridge.Visualize
                     it.Outlines = SpanTools.Outlines(obj, tol);
 
                 items.Add(it);
+            }
+
+            // Line-to-line links: find each master curve.
+            var byId = new Dictionary<string, Item>(StringComparer.OrdinalIgnoreCase);
+            foreach (Item it in items) if (it.Crv != null) byId[it.Obj.Id.ToString()] = it;
+            foreach (Item it in items)
+            {
+                Item master;
+                if (it.LinkTo != null && byId.TryGetValue(it.LinkTo.Trim(), out master) && master != it) it.LinkMaster = master;
             }
 
             double diag = sceneBox.IsValid ? sceneBox.Diagonal.Length : 0.0;
@@ -367,6 +389,9 @@ namespace AxisBridge.Visualize
             {
                 if (!IsShown(e.RhinoDoc, it)) continue;
                 if (Settings.Supports && it.Support != null) DrawSupport(e.Display, it);
+                if (Settings.Supports && it.SupportOutlines != null)
+                    foreach (List<Point3d> o in it.SupportOutlines) e.Display.DrawPolyline(o, SupportColor, 4);
+                if (Settings.Supports && it.LinkMaster != null) DrawLineLink(e.Display, it);
                 if (Settings.Releases && it.Release != null) DrawReleaseMarkers(e.Display, it);
                 if (Settings.Span) foreach (Line l in it.Spans) DrawDoubleArrow(e.Display, l, SpanColor);
                 if (Settings.LocalAxes && it.Crv != null) DrawTriad(e.Display, it);
@@ -388,15 +413,23 @@ namespace AxisBridge.Visualize
                 var lines = new List<string>();
                 if (Settings.Info) lines.AddRange(it.Info);
                 if (Settings.Other) lines.AddRange(it.Other);
+                // Screen space the info label takes above / below the anchor, so the one-line labels go beyond it.
+                double label = Math.Max(3, Settings.LabelSize), above = 0, below = 0;
                 if (lines.Count > 0)
                 {
-                    double off = it.Crv != null ? lines.Count * Math.Max(6, Settings.LabelSize) * 0.6 + 10 : 0;
+                    double off = it.Crv != null ? lines.Count * label * 0.6 + 10 : 0;
                     bool loaded = Settings.Loads && it.Loads.Exists(InCase);
                     DrawLabel(e, it.Anchor, lines, lines.Count == it.Other.Count && !Settings.Info ? OtherColor : InfoColor, loaded ? off : -off);
+                    if (loaded) below = 2 * off; else if (off > 0) above = 2 * off; else { above = below = lines.Count * label * 0.6; }
                 }
 
+                double symbol = SymbolPx * Settings.SymbolScale * 2 + 12;
                 if (Settings.Supports && it.Support != null && SupportKind(it.Support) == "custom")
-                    DrawLabel(e, it.Anchor, new List<string> { "k=" + Short(it.Support) }, CustomSupportColor, SymbolPx * Settings.SymbolScale * 2 + 12);
+                    DrawLabel(e, it.Anchor, new List<string> { "k=" + Short(it.Support) }, CustomSupportColor, Math.Max(symbol, below + label));
+                if (Settings.Supports && it.SurfaceSupport != null)
+                    DrawLabel(e, it.Anchor, new List<string> { "foundation k=" + Short(it.SurfaceSupport) }, SupportColor, Math.Max(symbol, below + label));
+                if (Settings.Supports && it.LinkMaster != null)
+                    DrawLabel(e, it.Anchor, new List<string> { "line link" }, LinkColor, -Math.Max(symbol, above + label));
 
                 // Release text only when the member is long enough on screen for both labels to fit.
                 if (Settings.Releases && it.Release != null && ScreenLength(e, it) >= 140)
@@ -481,7 +514,7 @@ namespace AxisBridge.Visualize
         private void DrawLabel(DrawEventArgs e, Point3d world, List<string> lines, Color color, double dyPixels = 0, double dxPixels = 0)
         {
             double k = Zoom(e.Viewport, world);
-            double h = Math.Max(6, Settings.LabelSize) * k;
+            double h = Math.Max(3, Settings.LabelSize) * k;
             if (h < 4) return;   // too small to read at this zoom
             int hp = (int)Math.Round(Math.Min(h, 400));
             Point2d s = e.Viewport.WorldToClient(world);
@@ -565,6 +598,17 @@ namespace AxisBridge.Visualize
                 materials[c.ToArgb()] = m;
             }
             return m;
+        }
+
+        /// <summary>A line-to-line link: the two link lines AxisVM will draw, master ends to the nearer slave ends.</summary>
+        private void DrawLineLink(DisplayPipeline d, Item slave)
+        {
+            Curve m = slave.LinkMaster.Crv, s = slave.Crv;
+            Point3d ms = m.PointAtStart, me = m.PointAtEnd, ss = s.PointAtStart, se = s.PointAtEnd;
+            bool straight = ms.DistanceTo(ss) + me.DistanceTo(se) <= ms.DistanceTo(se) + me.DistanceTo(ss);
+            d.DrawDottedLine(ms, straight ? ss : se, LinkColor);
+            d.DrawDottedLine(me, straight ? se : ss, LinkColor);
+            d.DrawCurve(s, LinkColor, 3);
         }
 
         // ---------------------------------------------------------- releases

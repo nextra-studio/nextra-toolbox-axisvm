@@ -151,7 +151,7 @@ namespace AxisVM_plugin.UI
             StyleControls(body);
         }
 
-        private static Panel CreateHeader(string title, string subtitle)
+        public static Panel CreateHeader(string title, string subtitle)
         {
             Panel header = new Panel { Dock = DockStyle.Top, Height = 88, BackColor = Accent, Padding = new Padding(16, 10, 16, 10) };
             Label heading = new Label
@@ -180,7 +180,7 @@ namespace AxisVM_plugin.UI
         }
 
         /// <summary>Paint the existing Button: Click, DialogResult, keyboard and accessibility stay native.</summary>
-        private static void StyleButton(Button button, bool primary)
+        public static void StyleButton(Button button, bool primary)
         {
             button.FlatStyle = FlatStyle.Flat;
             button.FlatAppearance.BorderSize = 0;

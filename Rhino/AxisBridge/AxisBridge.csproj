@@ -33,15 +33,15 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="RhinoCommon">
-      <HintPath>$(UserProfile)\.nuget\packages\rhinocommon\8.6.24101.5001\lib\net48\RhinoCommon.dll</HintPath>
+      <HintPath>$(UserProfile)\.nuget\packages\rhinocommon\8.0.23304.9001\lib\net48\RhinoCommon.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="Rhino.UI">
-      <HintPath>$(UserProfile)\.nuget\packages\rhinocommon\8.6.24101.5001\lib\net48\Rhino.UI.dll</HintPath>
+      <HintPath>$(UserProfile)\.nuget\packages\rhinocommon\8.0.23304.9001\lib\net48\Rhino.UI.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="Eto">
-      <HintPath>$(UserProfile)\.nuget\packages\rhinocommon\8.6.24101.5001\lib\net48\Eto.dll</HintPath>
+      <HintPath>$(UserProfile)\.nuget\packages\rhinocommon\8.0.23304.9001\lib\net48\Eto.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="Newtonsoft.Json">

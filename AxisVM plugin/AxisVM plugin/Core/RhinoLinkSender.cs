@@ -57,20 +57,27 @@ namespace AxisVM_plugin.Core
                 .Set("built", oldSection != null && oldSection["built"] != null ? oldSection["built"] : JsonValue.Arr())
                 .Set("segments", oldSection != null && oldSection["segments"] != null ? oldSection["segments"] : JsonValue.Obj())
                 .Set("panelIds", oldSection != null && oldSection["panelIds"] != null ? oldSection["panelIds"] : JsonValue.Obj())
+                .Set("hingeIds", oldSection != null && oldSection["hingeIds"] != null ? oldSection["hingeIds"] : JsonValue.Obj())
                 .Set("unitSystem", JsonValue.Str("Meters"))
                 .Set("model", JsonValue.Str(SafeFileName(model)));
 
             Context ctx = new Context { Model = model, Key = key, RhinoKnows = rhinoKnows, Section = section, Res = res, Loads = LinkLoads.Read(model) };
             ctx.ReadMembers();
+            ctx.Extras = LinkExtras.Read(model);
+            ctx.RhinoTypes = RhinoTypes(current);
+            ctx.RhinoHingeDomains = RhinoLineAttr(current, AxKeys.HingeDomains);
+            ctx.RhinoHingeSegs = RhinoHingeSegs(current);
 
             HashSet<string> present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             LinkState.BeginCache(model);
             try
             {
                 ctx.ReadDiaphragms(RhinoDiaphragms(current));
-                section.Set("lines", Lines(ctx, rhinoStarts, present));
+                JsonValue lines = Lines(ctx, rhinoStarts, present);
+                section.Set("lines", lines);
                 JsonValue domains = Domains(model, key, rhinoKnows, present, section, res, ctx);
                 Panels(ctx, present, domains);
+                Hinges(ctx, present, lines);
                 section.Set("domains", domains);
                 section.Set("points", Points(ctx, present));
             }
@@ -88,13 +95,14 @@ namespace AxisVM_plugin.Core
                 if (g.Length > 0 && !present.Contains(g)) { deleted.Add(JsonValue.Str(g)); res.Deleted++; }
             }
             section.Set("deleted", deleted);
+            KeepSignatures(oldSection, section);
 
             foreach (KeyValuePair<string, int> kv in ctx.Loads.NotSent)
                 res.Notes.Add(string.Format("{0} load(s) of type '{1}' are not sent to Rhino.", kv.Value, kv.Key));
             if (ctx.Loads.Averaged > 0)
                 res.Notes.Add(ctx.Loads.Averaged + " load panel load(s) vary over the panel; Rhino gets their average intensity.");
-            res.Notes.Add("Supports, releases, springs and links made or changed in AxisVM are not sent to Rhino; loads are sent for elements drawn in AxisVM. " +
-                          "The next 'Load from Rhino' rebuilds the linked elements from Rhino, so keep Rhino's version up to date.");
+            res.Notes.Add("Sent besides geometry, types, sections and materials: supports, elastic foundations, releases, springs, node-node and " +
+                          "line-to-line links, rigid bodies, edge hinges and surface supports made or changed in AxisVM; loads of elements drawn in AxisVM.");
             JsonValue notes = JsonValue.Arr();
             foreach (string n in res.Notes) notes.Add(JsonValue.Str(n));
             section.Set("notes", notes);
@@ -104,12 +112,83 @@ namespace AxisVM_plugin.Core
         }
 
         /// <summary>
-        /// After "Load from Rhino": AxisVM is in line with that Rhino model. The axisvm section is reset
-        /// (no changes) and lists what was built, so a later send can tell what was deleted in AxisVM.
+        /// The signatures "only changes" compares with (LinkDiff), carried across a send: an element drawn in AxisVM gets
+        /// the signature of what was sent for it - what Rhino will echo back - so the next load keeps it instead of
+        /// rebuilding it; an element changed or deleted in AxisVM loses its signature, so the next load rebuilds it from
+        /// Rhino's version (which by then holds the change).
         /// </summary>
-        public static void MarkLoaded(IAxisVMModel model, string linkPath, string rhinoSent)
+        private static void KeepSignatures(JsonValue oldSection, JsonValue section)
+        {
+            JsonValue sigs = JsonValue.Obj();
+            JsonValue old = oldSection == null ? null : oldSection["sigs"];
+            if (old != null && old.ObjectValue != null) foreach (KeyValuePair<string, JsonValue> kv in old.ObjectValue) sigs.Set(kv.Key, kv.Value);
+            foreach (string list in new[] { "points", "lines", "domains" })
+            {
+                JsonValue arr = section[list];
+                for (int i = 0; arr != null && i < arr.Count; i++)
+                {
+                    JsonValue e = arr.At(i);
+                    string guid = LinkFile.Get(e, "guid");
+                    if (guid.Length == 0 || e["changed"] == null || !e["changed"].BoolValue) continue;
+                    if (e["new"] != null && e["new"].BoolValue) sigs.Set(guid, JsonValue.Str(LinkSignature.Of(e, list, 1.0)));
+                    else if (sigs.ObjectValue.ContainsKey(guid)) sigs.ObjectValue.Remove(guid);
+                }
+            }
+            JsonValue deleted = section["deleted"];
+            for (int i = 0; deleted != null && i < deleted.Count; i++) sigs.ObjectValue.Remove(deleted.At(i).AsString(""));
+            section.Set("sigs", sigs);
+            foreach (string k in new[] { "sigSettings", "panelUids" })
+                if (oldSection != null && oldSection[k] != null) section.Set(k, oldSection[k]);
+        }
+
+        /// <summary>
+        /// The signatures, their settings, the load panel ids and what was built, as recorded by the last load or send
+        /// (LinkDiff input). <paramref name="built"/> is null when the link file does not say.
+        /// </summary>
+        public static void ReadRecord(JsonValue root, out Dictionary<string, string> sigs, out string settings, out Dictionary<int, string> panelGuids,
+                                      out HashSet<string> built)
+        {
+            sigs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            panelGuids = new Dictionary<int, string>();
+            settings = "";
+            built = null;
+            JsonValue sec = LinkFile.IsLink(root) ? root[LinkFile.AxisVmSection] : null;
+            if (sec == null) return;
+            JsonValue b = sec["built"];
+            if (b != null && b.Type == JsonValue.JsonType.Array)
+            {
+                built = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < b.Count; i++) built.Add(b.At(i).AsString(""));
+                JsonValue ids = sec["panelIds"];
+                if (ids != null && ids.ObjectValue != null) foreach (JsonValue v in ids.ObjectValue.Values) built.Add(v.AsString(""));
+                ids = sec["panelUids"];
+                if (ids != null && ids.ObjectValue != null) foreach (JsonValue v in ids.ObjectValue.Values) built.Add(v.AsString(""));
+            }
+            settings = LinkFile.Get(sec, "sigSettings");
+            JsonValue s = sec["sigs"];
+            if (s != null && s.ObjectValue != null) foreach (KeyValuePair<string, JsonValue> kv in s.ObjectValue) sigs[kv.Key] = kv.Value.AsString("");
+            JsonValue p = sec["panelUids"];
+            int uid;
+            if (p != null && p.ObjectValue != null)
+                foreach (KeyValuePair<string, JsonValue> kv in p.ObjectValue)
+                    if (int.TryParse(kv.Key, out uid)) panelGuids[uid] = kv.Value.AsString("");
+        }
+
+        /// <summary>
+        /// After "Load from Rhino": AxisVM is in line with that Rhino model. The axisvm section is reset
+        /// (no changes) and lists what was built, so a later send can tell what was deleted in AxisVM. With
+        /// <paramref name="sigs"/> it also records every Rhino object's signature, the settings they were read with and
+        /// which load panel stands for which Rhino surface - what the next "only changes" load compares with.
+        /// </summary>
+        public static void MarkLoaded(IAxisVMModel model, string linkPath, string rhinoSent,
+                                      Dictionary<string, string> sigs = null, string settings = null, Dictionary<int, string> panelGuids = null,
+                                      HashSet<string> rebuilt = null, bool baselines = true)
         {
             string key = AxisModelBuilder.LinkKey(linkPath);
+            if (baselines && (rebuilt == null || rebuilt.Count > 0))
+            {
+                try { WriteBaselines(model, key, File.Exists(linkPath) ? LinkFile.Read(linkPath) : null, rebuilt); } catch { }
+            }
             HashSet<string> built = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, int> segments = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             CollectGuids(model, key, built, segments);
@@ -128,7 +207,62 @@ namespace AxisVM_plugin.Core
                 .Set("model", JsonValue.Str(SafeFileName(model)))
                 .Set("lines", JsonValue.Arr()).Set("domains", JsonValue.Arr()).Set("points", JsonValue.Arr())
                 .Set("deleted", JsonValue.Arr()).Set("notes", JsonValue.Arr());
+            if (sigs != null)
+            {
+                JsonValue s = JsonValue.Obj();
+                foreach (KeyValuePair<string, string> kv in sigs) s.Set(kv.Key, JsonValue.Str(kv.Value));
+                JsonValue p = JsonValue.Obj();
+                if (panelGuids != null) foreach (KeyValuePair<int, string> kv in panelGuids) p.Set(kv.Key.ToString(CultureInfo.InvariantCulture), JsonValue.Str(kv.Value));
+                section.Set("sigs", s).Set("sigSettings", JsonValue.Str(settings ?? "")).Set("panelUids", p);
+            }
             LinkFile.Update(linkPath, root => root.Set(LinkFile.AxisVmSection, section));
+        }
+
+        /// <summary>
+        /// The extras baseline (supports, releases, springs, links, hinges - see LinkExtras) of what a load built: AxisVM's
+        /// state of them right after the load, which "Send to Rhino" compares with. Only for <paramref name="only"/> (the
+        /// rebuilt objects; null = all): a kept element keeps its baseline, so an AxisVM edit made to it stays pending.
+        /// </summary>
+        private static void WriteBaselines(IAxisVMModel model, string key, JsonValue root, HashSet<string> only)
+        {
+            Context ctx = new Context { Model = model, Key = key, Extras = LinkExtras.Read(model), RhinoTypes = RhinoTypes(root), RhinoHingeDomains = RhinoLineAttr(root, AxKeys.HingeDomains) };
+            Dictionary<string, double[]> starts = RhinoLineStarts(root);
+            AxisVMAttachments la = model.Lines.Attachments, da = model.Domains.Attachments, na = model.Nodes.Attachments;
+            var groups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+            LinkState.BeginCache(model);
+            try
+            {
+                int n = model.Lines.Count;
+                for (int i = 1; i <= n; i++)
+                {
+                    if (!Ours(la, i, key)) continue;
+                    foreach (string g in LinkState.Guids(la, i))
+                    {
+                        if (g.IndexOf('#') > 0) continue;
+                        if (!ctx.LineGuid.ContainsKey(i)) ctx.LineGuid[i] = g;
+                        if (only == null || only.Contains(g)) Group(groups, g, i);
+                    }
+                }
+                foreach (KeyValuePair<string, List<int>> kv in groups)
+                {
+                    double[] start;
+                    starts.TryGetValue(kv.Key, out start);
+                    WriteBaseline(la, kv.Value, kv.Key, LinkExtras.Text(CurveExtras(ctx, kv.Key, kv.Value, CurveNodes(model, kv.Value, start))));
+                }
+                for (int i = 1; i <= model.Domains.Count; i++)
+                {
+                    if (!Ours(da, i, key)) continue;
+                    foreach (string g in LinkState.Guids(da, i))
+                        if (only == null || only.Contains(g)) WriteBaseline(da, new[] { i }, g, LinkExtras.Text(DomainExtras(ctx.Extras, i)));
+                }
+                for (int i = 1; i <= model.Nodes.Count; i++)
+                {
+                    if (!Ours(na, i, key)) continue;
+                    foreach (string g in LinkState.Guids(na, i))
+                        if (only == null || only.Contains(g)) WriteBaseline(na, new[] { i }, g, LinkExtras.Text(NodeExtras(ctx.Extras, i)));
+                }
+            }
+            finally { LinkState.EndCache(); }
         }
 
         /// <summary>The polygon load panel ids recorded by earlier sends (kept across a load: the panels Rhino has not loaded yet still need them).</summary>
@@ -164,6 +298,21 @@ namespace AxisVM_plugin.Core
             public JsonValue Section;
             public SendResult Res;
             public LinkLoads Loads;
+            public LinkExtras Extras;
+            /// <summary>Ax_Type of every Rhino curve in the rhino section (to tell Rhino's edge hinge curves).</summary>
+            public Dictionary<string, string> RhinoTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            /// <summary>Ax_HingeDomains of the Rhino curves that name their domains.</summary>
+            public Dictionary<string, string> RhinoHingeDomains = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            /// <summary>The Rhino edge hinge curves by geometry (see <see cref="AlongRhinoHinge"/>).</summary>
+            public List<HingeSeg> RhinoHingeSegs = new List<HingeSeg>();
+            /// <summary>Line -> the curve it belongs to (filled while the curves are sent).</summary>
+            public readonly Dictionary<int, string> LineGuid = new Dictionary<int, string>();
+
+            public string DomainGuid(int domain)
+            {
+                try { List<string> g = LinkState.Guids(Model.Domains.Attachments, domain); return g.Count > 0 ? g[0] : null; }
+                catch { return null; }
+            }
             /// <summary>Line -> structural member; member -> its lines.</summary>
             public readonly Dictionary<int, int> LineMember = new Dictionary<int, int>();
             public readonly Dictionary<int, List<int>> MemberLines = new Dictionary<int, List<int>>();
@@ -264,8 +413,9 @@ namespace AxisVM_plugin.Core
                     string best = null;
                     int most = 0;
                     Dictionary<string, int> c;
+                    // A Rhino name may name several AxisVM diaphragms: AxisVM splits one into its connected parts.
                     if (votes.TryGetValue(d, out c))
-                        foreach (KeyValuePair<string, int> kv in c) if (kv.Value > most && !taken.Contains(kv.Key)) { most = kv.Value; best = kv.Key; }
+                        foreach (KeyValuePair<string, int> kv in c) if (kv.Value > most) { most = kv.Value; best = kv.Key; }
                     if (best == null) { int k = d; do best = "D" + k++; while (taken.Contains(best) || rhinoNames.ContainsValue(best)); }
                     taken.Add(best);
                     names[d] = best;
@@ -324,6 +474,7 @@ namespace AxisVM_plugin.Core
                     if (!Ours(a, i, key)) continue;
                     foreach (string g in LinkState.Guids(a, i))
                     {
+                        if (g.IndexOf('#') > 0) continue;   // a line-to-line link's link line
                         into.Add(g);
                         if (count == null) continue;
                         int c;
@@ -362,11 +513,18 @@ namespace AxisVM_plugin.Core
             Dictionary<string, List<int>> groups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
             HashSet<string> full = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             HashSet<int> adoptedMembers = new HashSet<int>();
+            HashSet<string> pendingHinges = PendingHinges(ctx);
+            HashSet<string> hingeCurves = HingeCurves(ctx);
             int n = model.Lines.Count;
 
             for (int i = 1; i <= n; i++)
             {
                 List<string> owners = LinkState.Guids(la, i);
+                // The link lines of a line-to-line link ("guid#link") belong to the link, not to a curve's shape;
+                // edge hinge curves Rhino has not loaded yet are sent by Hinges().
+                if (owners.Count > 0 && owners.TrueForAll(o => o.IndexOf('#') > 0)) continue;
+                owners.RemoveAll(o => o.IndexOf('#') > 0 || pendingHinges.Contains(o));
+                if (owners.Count == 0 && LinkState.Read(la, LinkState.Guid, i) != null) continue;
                 if (owners.Count > 0)
                 {
                     if (!Ours(la, i, key)) continue;
@@ -375,19 +533,26 @@ namespace AxisVM_plugin.Core
                     foreach (string g in owners)
                     {
                         Group(groups, g, i);
-                        if (adopted && !ctx.RhinoKnows.Contains(g)) full.Add(g);
+                        if (!ctx.LineGuid.ContainsKey(i)) ctx.LineGuid[i] = g;
+                        // Adopted per owner: a Rhino curve sharing a line with an adopted one is still Rhino's. An edge hinge
+                        // curve adopted from AxisVM is not a member: the member loads on its line are the member's.
+                        bool adoptedG = adopted && adoptedOwners.Contains(g) && !hingeCurves.Contains(g);
+                        if (adopted && adoptedOwners.Contains(g) && !ctx.RhinoKnows.Contains(g)) full.Add(g);
+                        if (adoptedG && !ctx.RhinoKnows.Contains(g)) full.Add(g);
                         int member;
-                        if (adopted && ctx.LineMember.TryGetValue(i, out member)) ctx.GuidMember[g] = member;
-                        else if (adopted) ctx.GuidLine[g] = i;
+                        if (adoptedG && ctx.LineMember.TryGetValue(i, out member)) ctx.GuidMember[g] = member;
+                        else if (adoptedG) ctx.GuidLine[g] = i;
                     }
                     continue;
                 }
 
-                // Drawn in AxisVM: only typed members become Rhino curves (plain lines are slab edges & co.),
-                // one curve per structural member, so a member split by its supports stays one curve with its loads.
-                if (!Native(la, i)) continue;
+                // Drawn in AxisVM: only typed members (beams, ribs, trusses, springs, node-node links) and rigid bodies
+                // become Rhino curves (plain lines are slab edges & co.), one curve per structural member, so a member
+                // split by its supports stays one curve with its loads. Link lines of line-to-line links are not curves.
+                if (!Native(la, i) || ctx.Extras.LinkLines.Contains(i)) continue;
                 RLineAttr attr;
-                if (!LinkState.TryLineAttr(model, i, out attr) || LinkState.LineTypeName(attr.LineType).Length == 0) continue;
+                if (!LinkState.TryLineAttr(model, i, out attr)) continue;
+                if (LinkState.LineTypeName(attr.LineType).Length == 0 && !ctx.Extras.RigidLines.Contains(i)) continue;
 
                 int m;
                 List<int> lines;
@@ -406,6 +571,7 @@ namespace AxisVM_plugin.Core
                     LinkState.Write(la, LinkState.Adopted, l, key + "|" + guid);
                     LinkState.Write(la, LinkState.State, l, LinkState.LineState(model, l));
                     Group(groups, guid, l);
+                    ctx.LineGuid[l] = guid;
                 }
                 if (m > 0) ctx.GuidMember[guid] = m; else ctx.GuidLine[guid] = i;
                 LinkState.Write(la, LoadsAttachment, lines[0], LoadsHash(CurveLoads(ctx, guid, lines)));
@@ -440,25 +606,50 @@ namespace AxisVM_plugin.Core
 
                 JsonValue attrs = JsonValue.Obj();
                 bool isFull = full.Contains(guid);
-                if (now != null)
+                bool rigidBody = isFull && ctx.Extras.RigidLines.Contains(kv.Value[0]);
+                if (rigidBody) attrs.Set("Ax_Type", JsonValue.Str("RigidLink"));
+                // A Rhino edge hinge / plain line / rigid link curve along a member's line takes nothing of the member.
+                else if (now != null && !NotAMember(ctx, guid))
                 {
                     if (!now[1].StartsWith("other", StringComparison.Ordinal) && (isFull || now[1] != then[1])) attrs.Set("Ax_Type", JsonValue.Str(now[1]));
-                    if (isFull || now[2] != then[2] || now[3] != then[3])
+                    // Only beams, ribs and trusses have a section and material; a spring's or link's line record still
+                    // holds whatever section AxisVM used last.
+                    bool frame = now[1] == "Beam" || now[1] == "Rib" || now[1] == "Truss";
+                    if (frame && (isFull || now[2] != then[2] || now[3] != then[3]))
                         attrs.Set("Ax_Section", JsonValue.Str(now[2] == now[3] || now[3].Length == 0 ? now[2] : now[2] + ";" + now[3]));
-                    if (isFull || now[4] != then[4]) attrs.Set("Ax_Material", JsonValue.Str(now[4]));
+                    if (frame && (isFull || now[4] != then[4])) attrs.Set("Ax_Material", JsonValue.Str(now[4]));
                 }
 
-                // Rigid diaphragm: stated on the curve unless a domain along it already says so.
+                // Rigid diaphragm: stated on the curve unless a domain along it already says so - and only when all of
+                // the curve's own lines are in it. A line it shares with another curve (overlapping members) is that
+                // curve's business as much as this one's, so it alone does not put this curve in a diaphragm.
                 var diaNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 string diaWant = "";
+                List<int> own = kv.Value.FindAll(id => LinkState.Guids(la, id).Count <= 1);
+                if (own.Count == 0) own = kv.Value;
+                bool allIn = true;
                 foreach (int id in kv.Value)
                 {
                     string d;
-                    if (!ctx.LineDiaphragm.TryGetValue(id, out d)) continue;
+                    if (!ctx.LineDiaphragm.TryGetValue(id, out d)) { if (own.Contains(id)) allIn = false; continue; }
+                    // A curve lying wholly on another's lines: a diaphragm that other curve has in Rhino is the other's.
+                    if (own == kv.Value && LinkState.Guids(la, id).Exists(o =>
+                    {
+                        string od;
+                        return !string.Equals(o, guid, StringComparison.OrdinalIgnoreCase)
+                            && ctx.RhinoDiaphragm.TryGetValue(o, out od) && string.Equals(od, d, StringComparison.OrdinalIgnoreCase);
+                    }))
+                    {
+                        // Still a diaphragm the line is in: a curve that has it in Rhino too is left as it is.
+                        diaNames.Add(d);
+                        allIn = false;
+                        continue;
+                    }
                     diaNames.Add(d);
-                    if (diaWant.Length == 0 && !ctx.DiaphragmByDomain.Contains(id)) diaWant = d;
+                    if (diaWant.Length == 0 && own.Contains(id) && !ctx.DiaphragmByDomain.Contains(id)) diaWant = d;
                 }
-                string dia = ctx.DiaphragmChange(guid, diaNames, diaWant);
+                if (!allIn) diaWant = "";
+                string dia = NotAMember(ctx, guid) || hingeCurves.Contains(guid) ? null : ctx.DiaphragmChange(guid, diaNames, diaWant);
                 if (dia != null) attrs.Set(AxKeys.Diaphragm, JsonValue.Str(dia));
 
                 // Loads of curves drawn in AxisVM (Rhino owns the loads of its own curves).
@@ -469,6 +660,10 @@ namespace AxisVM_plugin.Core
                     if (isFull || LoadsHash(loads) != (LinkState.Read(la, LoadsAttachment, first) ?? "")) SetLoads(attrs, loads);
                 }
 
+                // Supports, releases, springs, links, hinges: what changed against the baseline.
+                Dictionary<string, string> extras = CurveExtras(ctx, guid, kv.Value, CurveNodes(model, kv.Value, start));
+                ApplyExtras(attrs, extras, ReadBaseline(la, kv.Value[0], guid), isFull, text => WriteBaseline(la, kv.Value, guid, text));
+
                 bool changed = isFull || geomChanged || attrs.Count > 0;
                 e.Set("changed", JsonValue.Bool(changed)).Set("geomChanged", JsonValue.Bool(isFull || geomChanged))
                  .Set("new", JsonValue.Bool(isFull)).Set("attrs", attrs);
@@ -476,6 +671,276 @@ namespace AxisVM_plugin.Core
                 arr.Add(e);
             }
             return arr;
+        }
+
+        // ==================================================================
+        // Supports, releases, springs, links, hinges (LinkExtras)
+        // ==================================================================
+
+        private static string NormType(string t) { return (t ?? "").Trim().ToLowerInvariant().Replace(" ", "").Replace("-", "").Replace("_", ""); }
+
+        private static bool IsHingeType(Dictionary<string, string> types, string guid)
+        {
+            string t;
+            return types.TryGetValue(guid, out t) && (NormType(t) == "edgehinge" || NormType(t) == "hinge");
+        }
+
+        /// <summary>A Rhino curve that is not a member itself (edge hinge, plain line, rigid link) - it may run along one.</summary>
+        private static bool NotAMember(Context ctx, string guid)
+        {
+            string t;
+            if (!ctx.RhinoTypes.TryGetValue(guid, out t)) return false;
+            switch (NormType(t))
+            {
+                case "edgehinge": case "hinge": case "simple": case "simpleline": case "line":
+                case "rigidlink": case "rigid": case "rigidbody": return true;
+                default: return false;
+            }
+        }
+
+        /// <summary>Ax_Type of every Rhino curve in the link file's rhino section.</summary>
+        private static Dictionary<string, string> RhinoTypes(JsonValue root)
+        {
+            return RhinoLineAttr(root, AxKeys.Type);
+        }
+
+        /// <summary>One attribute of every Rhino curve that has it, by curve guid.</summary>
+        private static Dictionary<string, string> RhinoLineAttr(JsonValue root, string key)
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            JsonValue r;
+            try { r = root == null ? null : LinkFile.RhinoPart(root); } catch { return map; }
+            JsonValue arr = r == null ? null : r["lines"];
+            for (int i = 0; arr != null && i < arr.Count; i++)
+            {
+                string t = LinkFile.Get(arr.At(i)["attrs"], key);
+                if (t.Length > 0) map[LinkFile.Get(arr.At(i), "guid")] = t;
+            }
+            return map;
+        }
+
+        /// <summary>Edge hinge curves adopted from AxisVM that Rhino has not loaded yet (sent by Hinges, not as curves).</summary>
+        private static HashSet<string> PendingHinges(Context ctx)
+        {
+            HashSet<string> set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            JsonValue ids = ctx.Section["hingeIds"];
+            if (ids != null && ids.ObjectValue != null)
+                foreach (JsonValue v in ids.ObjectValue.Values) { string g = v.AsString(""); if (g.Length > 0 && !ctx.RhinoKnows.Contains(g)) set.Add(g); }
+            return set;
+        }
+
+        /// <summary>Every edge hinge curve adopted from AxisVM ("hingeIds"), loaded by Rhino or not.</summary>
+        private static HashSet<string> HingeCurves(Context ctx)
+        {
+            HashSet<string> set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            JsonValue ids = ctx.Section["hingeIds"];
+            if (ids != null && ids.ObjectValue != null)
+                foreach (JsonValue v in ids.ObjectValue.Values) { string g = v.AsString(""); if (g.Length > 0) set.Add(g); }
+            return set;
+        }
+
+        /// <summary>The nodes along a curve's lines, from the end nearest <paramref name="start"/> (null when they are no chain).</summary>
+        private static List<int> CurveNodes(IAxisVMModel model, List<int> lines, double[] start)
+        {
+            List<int> nodes = Walk(model, lines, false);
+            if (nodes == null || nodes.Count < 2 || start == null) return nodes;
+            double[] a = LinkState.NodeXyz(model, nodes[0]), b = LinkState.NodeXyz(model, nodes[nodes.Count - 1]);
+            if (a != null && b != null && Dist(b, start) < Dist(a, start)) nodes.Reverse();
+            return nodes;
+        }
+
+        /// <summary>The extras of a curve, as its kind of Rhino curve carries them.</summary>
+        private static Dictionary<string, string> CurveExtras(Context ctx, string guid, List<int> lines, List<int> nodes)
+        {
+            if (IsHingeType(ctx.RhinoTypes, guid))
+            {
+                // Two domains on one line each have their own hinge (and curve): look only at this curve's domains.
+                string named;
+                ctx.RhinoHingeDomains.TryGetValue(guid, out named);
+                return ctx.Extras.Hinge(lines, ctx.DomainGuid, AttributeParser.SplitList(named));
+            }
+            Dictionary<string, string> ex = ctx.Extras.Curve(lines, nodes, l => { string g; return ctx.LineGuid.TryGetValue(l, out g) ? g : null; });
+            if (NotAMember(ctx, guid))
+            {
+                string s;
+                bool support = ex.TryGetValue(AxKeys.Support, out s);
+                ex.Clear();
+                if (support) ex[AxKeys.Support] = s;
+            }
+            return ex;
+        }
+
+        /// <summary>
+        /// Puts the extras to send into <paramref name="attrs"/>: all of them for a new element, else those that differ from
+        /// the baseline ("" = removed in AxisVM). With no baseline yet (an element loaded before extras were tracked), the
+        /// current state becomes the baseline and nothing is sent.
+        /// </summary>
+        private static void ApplyExtras(JsonValue attrs, Dictionary<string, string> extras, Dictionary<string, string> baseline, bool isFull, Action<string> writeBaseline)
+        {
+            if (isFull)
+            {
+                foreach (KeyValuePair<string, string> kv in extras) attrs.Set(kv.Key, JsonValue.Str(kv.Value));
+                writeBaseline(LinkExtras.Text(extras));
+                return;
+            }
+            if (baseline == null) { writeBaseline(LinkExtras.Text(extras)); return; }
+            foreach (KeyValuePair<string, string> kv in LinkExtras.Changes(extras, baseline)) attrs.Set(kv.Key, JsonValue.Str(kv.Value));
+        }
+
+        /// <summary>One element's baseline in the <see cref="LinkExtras.Attachment"/> of an entity: one "guid|k=v&#9;k=v" line per element.</summary>
+        private static Dictionary<string, string> ReadBaseline(AxisVMAttachments a, int index, string guid)
+        {
+            string all = LinkState.Read(a, LinkExtras.Attachment, index);
+            if (all == null) return null;
+            foreach (string line in all.Split('\n'))
+                if (line.StartsWith(guid + "|", StringComparison.OrdinalIgnoreCase))
+                    return LinkExtras.Parse(line.Substring(guid.Length + 1).Replace('\t', '\n'));
+            return null;
+        }
+
+        private static void WriteBaseline(AxisVMAttachments a, IEnumerable<int> indices, string guid, string text)
+        {
+            foreach (int index in indices)
+            {
+                string all = LinkState.Read(a, LinkExtras.Attachment, index) ?? "";
+                List<string> keep = new List<string>();
+                foreach (string line in all.Split('\n'))
+                    if (line.Length > 0 && !line.StartsWith(guid + "|", StringComparison.OrdinalIgnoreCase)) keep.Add(line);
+                keep.Add(guid + "|" + text.Replace('\n', '\t'));
+                LinkState.Write(a, LinkExtras.Attachment, index, string.Join("\n", keep));
+            }
+        }
+
+        /// <summary>
+        /// Edge hinges made in AxisVM become Rhino EdgeHinge curves (Ax_Stiffness, Ax_HingeDomains), one per straight run
+        /// of hinged lines along one domain with one stiffness. Their ids are kept per line and domain ("hingeIds"), and on
+        /// the lines (RhinoGuid), so each is adopted once; once Rhino holds one it is an ordinary curve (sent by Lines).
+        /// Hinges along a Rhino edge hinge curve are Rhino's.
+        /// </summary>
+        private static void Hinges(Context ctx, HashSet<string> present, JsonValue arr)
+        {
+            IAxisVMModel model = ctx.Model;
+            AxisVMAttachments la = model.Lines.Attachments;
+            JsonValue ids = ctx.Section["hingeIds"];
+            var lines = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+            var info = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);   // guid -> domain guid, stiffness
+            var fresh = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+
+            foreach (KeyValuePair<int, List<KeyValuePair<int, string>>> kv in ctx.Extras.Hinges)
+            {
+                int line = kv.Key;
+                List<string> owners = LinkState.Guids(la, line);
+                // Hinges along a Rhino edge hinge curve are Rhino's - but only onto the domains that curve names (a line
+                // between two domains has one hinge per domain, and the other one may be new in AxisVM).
+                List<string> rhinoHinges = owners.FindAll(o => IsHingeType(ctx.RhinoTypes, o) && ctx.RhinoKnows.Contains(o));
+                int uid;
+                try { uid = model.Lines.get_UID(line); } catch { continue; }
+                foreach (KeyValuePair<int, string> h in kv.Value)
+                {
+                    string dg = ctx.DomainGuid(h.Key);
+                    if (dg == null) continue;
+                    if (rhinoHinges.Exists(o =>
+                    {
+                        string named;
+                        if (!ctx.RhinoHingeDomains.TryGetValue(o, out named)) return true;   // blank = every domain along it
+                        List<string> l = AttributeParser.SplitList(named);
+                        return l.Count == 0 || l.Exists(n => string.Equals(n, dg, StringComparison.OrdinalIgnoreCase)
+                                                           || string.Equals(n, LinkFile.BaseGuid(dg), StringComparison.OrdinalIgnoreCase));
+                    })) continue;
+                    if (AlongRhinoHinge(ctx, line, dg)) continue;
+                    JsonValue known = ids[uid + "|" + dg];
+                    string g = known == null ? "" : known.AsString("");
+                    if (g.Length > 0)
+                    {
+                        if (ctx.RhinoKnows.Contains(g)) continue;   // Rhino's now - sent with the curves
+                        Group(lines, g, line);
+                        info[g] = new[] { dg, h.Value };
+                        continue;
+                    }
+                    Group(fresh, dg + "\n" + h.Value, line);
+                }
+            }
+
+            foreach (KeyValuePair<string, List<int>> kv in fresh)
+            {
+                string[] key = kv.Key.Split('\n');
+                foreach (List<int> chain in Runs(model, kv.Value))
+                {
+                    string g = System.Guid.NewGuid().ToString();
+                    foreach (int l in chain)
+                    {
+                        try { ids.Set(model.Lines.get_UID(l) + "|" + key[0], JsonValue.Str(g)); } catch { }
+                        List<string> owners = LinkState.Guids(la, l);
+                        owners.Add(g);
+                        LinkState.Write(la, LinkState.Guid, l, string.Join(";", owners));
+                        // A plain (mesh / edge) line never had a baseline: without one it would count as moved.
+                        if (LinkState.Read(la, LinkState.State, l) == null) LinkState.Write(la, LinkState.State, l, LinkState.LineState(model, l));
+                        List<string> adopted;
+                        string k = LinkState.AdoptedKey(LinkState.Read(la, LinkState.Adopted, l), out adopted);
+                        if (k == null || k == ctx.Key) { adopted.Add(g); LinkState.Write(la, LinkState.Adopted, l, ctx.Key + "|" + string.Join(";", adopted)); }
+                    }
+                    lines[g] = chain;
+                    info[g] = key;
+                    Built(ctx.Section, g, chain.Count);
+                    ctx.Res.Adopted++;
+                }
+            }
+
+            foreach (KeyValuePair<string, List<int>> kv in lines)
+            {
+                string g = kv.Key;
+                present.Add(g);
+                JsonValue e = JsonValue.Obj().Set("guid", JsonValue.Str(g));
+                if (!WriteCurve(model, kv.Value, null, e)) continue;
+                e.Set("changed", JsonValue.Bool(true)).Set("geomChanged", JsonValue.Bool(true)).Set("new", JsonValue.Bool(true))
+                 .Set("attrs", JsonValue.Obj().Set(AxKeys.Type, JsonValue.Str("EdgeHinge")).Set(AxKeys.Stiffness, JsonValue.Str(info[g][1]))
+                                             .Set(AxKeys.HingeDomains, JsonValue.Str(info[g][0])));
+                ctx.Res.Changed++;
+                arr.Add(e);
+            }
+        }
+
+        /// <summary>The lines split into straight runs: lines meeting end to end in one direction, each run one simple chain.</summary>
+        private static List<List<int>> Runs(IAxisVMModel model, List<int> lines)
+        {
+            Dictionary<int, int> parent = new Dictionary<int, int>();
+            Func<int, int> find = null;
+            find = x => { int p = parent[x]; if (p == x) return x; int r = find(p); parent[x] = r; return r; };
+            foreach (int l in lines) parent[l] = l;
+            Dictionary<int, List<int>> at = new Dictionary<int, List<int>>();
+            foreach (int l in lines)
+            {
+                int[] e = LinkState.LineNodes(model, l);
+                if (e == null) continue;
+                foreach (int nd in e) { List<int> x; if (!at.TryGetValue(nd, out x)) { x = new List<int>(); at[nd] = x; } x.Add(l); }
+            }
+            foreach (List<int> meeting in at.Values)
+            {
+                if (meeting.Count != 2 || !Collinear(model, meeting[0], meeting[1])) continue;
+                parent[find(meeting[0])] = find(meeting[1]);
+            }
+            var runs = new Dictionary<int, List<int>>();
+            foreach (int l in lines) { int r = find(l); List<int> x; if (!runs.TryGetValue(r, out x)) { x = new List<int>(); runs[r] = x; } x.Add(l); }
+            List<List<int>> result = new List<List<int>>();
+            foreach (List<int> run in runs.Values)
+            {
+                if (run.Count == 1 || Walk(model, run, false) != null) result.Add(run);
+                else foreach (int l in run) result.Add(new List<int> { l });
+            }
+            return result;
+        }
+
+        private static bool Collinear(IAxisVMModel model, int a, int b)
+        {
+            int[] ea = LinkState.LineNodes(model, a), eb = LinkState.LineNodes(model, b);
+            if (ea == null || eb == null || LinkState.IsArc(model, a) || LinkState.IsArc(model, b)) return false;
+            double[] a0 = LinkState.NodeXyz(model, ea[0]), a1 = LinkState.NodeXyz(model, ea[1]), b0 = LinkState.NodeXyz(model, eb[0]), b1 = LinkState.NodeXyz(model, eb[1]);
+            if (a0 == null || a1 == null || b0 == null || b1 == null) return false;
+            double[] u = { a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2] }, v = { b1[0] - b0[0], b1[1] - b0[1], b1[2] - b0[2] };
+            double lu = Math.Sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]), lv = Math.Sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (lu < Tol || lv < Tol) return false;
+            double dot = Math.Abs(u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) / (lu * lv);
+            return dot > 1 - 1e-6;
         }
 
         /// <summary>Attachment on the first line of an adopted curve: its loads when it was adopted, to send only changed loads later.</summary>
@@ -754,6 +1219,8 @@ namespace AxisVM_plugin.Core
                     Dictionary<string, List<string>> loads = DomainLoads(ctx, i);
                     if (isFull || LoadsHash(loads) != (LinkState.Read(da, LoadsAttachment, i) ?? "")) SetLoads(attrs, loads);
                 }
+                int domainIndex = i;
+                ApplyExtras(attrs, DomainExtras(ctx.Extras, i), ReadBaseline(da, i, guid), isFull, text => WriteBaseline(da, new[] { domainIndex }, guid, text));
 
                 bool changed = isFull || now[0] != then[0] || attrs.Count > 0;
                 e.Set("changed", JsonValue.Bool(changed)).Set("geomChanged", JsonValue.Bool(isFull || now[0] != then[0]))
@@ -762,6 +1229,22 @@ namespace AxisVM_plugin.Core
                 arr.Add(e);
             }
             return arr;
+        }
+
+        private static Dictionary<string, string> DomainExtras(LinkExtras extras, int domain)
+        {
+            var a = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string s = extras.Domain(domain);
+            if (s != null) a[AxKeys.SurfaceSupport] = s;
+            return a;
+        }
+
+        private static Dictionary<string, string> NodeExtras(LinkExtras extras, int node)
+        {
+            var a = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string s = extras.Node(node);
+            if (s != null) a[AxKeys.Support] = s;
+            return a;
         }
 
         private static Dictionary<string, List<string>> DomainLoads(Context ctx, int domain)
@@ -938,10 +1421,11 @@ namespace AxisVM_plugin.Core
             AxisVMAttachments na = model.Nodes.Attachments;
             JsonValue arr = JsonValue.Arr();
 
-            // Nodes drawn in AxisVM that carry nodal loads become Rhino points with Ax_NodalLoad.
-            foreach (KeyValuePair<int, List<string>> kv in ctx.Loads.Nodal)
+            // Nodes drawn in AxisVM that carry nodal loads or a support become Rhino points with Ax_NodalLoad / Ax_Support.
+            HashSet<int> adopt = new HashSet<int>(ctx.Loads.Nodal.Keys);
+            adopt.UnionWith(ctx.Extras.NodeSupport.Keys);
+            foreach (int node in adopt)
             {
-                int node = kv.Key;
                 if (node <= 0 || !Native(na, node)) continue;
                 string guid = System.Guid.NewGuid().ToString();
                 LinkState.Write(na, LinkState.Guid, node, guid);
@@ -971,7 +1455,10 @@ namespace AxisVM_plugin.Core
                         List<string> loads;
                         SetLoads(attrs, new Dictionary<string, List<string>> { { "Ax_NodalLoad", ctx.Loads.Nodal.TryGetValue(i, out loads) ? loads : new List<string>() } });
                     }
-                    bool send = changed || isNew;
+                    int nodeIndex = i;
+                    string owner = g;
+                    ApplyExtras(attrs, NodeExtras(ctx.Extras, i), ReadBaseline(na, i, g), isNew, text => WriteBaseline(na, new[] { nodeIndex }, owner, text));
+                    bool send = changed || isNew || attrs.Count > 0;
                     arr.Add(JsonValue.Obj().Set("guid", JsonValue.Str(g)).Set("xyz", P(p))
                         .Set("changed", JsonValue.Bool(send)).Set("geomChanged", JsonValue.Bool(changed || isNew)).Set("new", JsonValue.Bool(isNew)).Set("attrs", attrs));
                     if (send) ctx.Res.Changed++; else ctx.Res.Unchanged++;
@@ -983,6 +1470,64 @@ namespace AxisVM_plugin.Core
         // ==================================================================
         // Helpers
         // ==================================================================
+
+        /// <summary>A Rhino edge hinge curve [m] and the domains it names (null = every domain along it).</summary>
+        private class HingeSeg { public double[] A, B; public HashSet<string> Domains; }
+
+        /// <summary>The straight Rhino edge hinge curves, to know a hinge as Rhino's by where it lies even where a rebuild left its line without the curve's id.</summary>
+        private static List<HingeSeg> RhinoHingeSegs(JsonValue root)
+        {
+            var segs = new List<HingeSeg>();
+            JsonValue r;
+            try { r = root == null ? null : LinkFile.RhinoPart(root); } catch { return segs; }
+            if (r == null) return segs;
+            string unit = LinkFile.Get(r["source"], "unitSystem");
+            double scale = unit.Length == 0 ? 1.0 : AxUnits.LengthUnitFactors[AxUnits.LengthIndexFromRhinoName(unit)];
+            JsonValue lines = r["lines"];
+            for (int i = 0; lines != null && i < lines.Count; i++)
+            {
+                JsonValue l = lines.At(i), s = l["start"], e = l["end"];
+                string t = NormType(LinkFile.Get(l["attrs"], AxKeys.Type));
+                if ((t != "edgehinge" && t != "hinge") || s == null || e == null || s.Count < 3 || e.Count < 3 || l["points"] != null || l["arcMid"] != null) continue;
+                List<string> named = AttributeParser.SplitList(LinkFile.Get(l["attrs"], AxKeys.HingeDomains));
+                segs.Add(new HingeSeg
+                {
+                    A = new[] { s.At(0).AsDouble(0) * scale, s.At(1).AsDouble(0) * scale, s.At(2).AsDouble(0) * scale },
+                    B = new[] { e.At(0).AsDouble(0) * scale, e.At(1).AsDouble(0) * scale, e.At(2).AsDouble(0) * scale },
+                    Domains = named.Count == 0 ? null : new HashSet<string>(named, StringComparer.OrdinalIgnoreCase)
+                });
+            }
+            return segs;
+        }
+
+        /// <summary>True when the line lies along a Rhino edge hinge curve that names this domain (or names none).</summary>
+        private static bool AlongRhinoHinge(Context ctx, int line, string domainGuid)
+        {
+            if (ctx.RhinoHingeSegs.Count == 0) return false;
+            int[] ends = LinkState.LineNodes(ctx.Model, line);
+            if (ends == null) return false;
+            double[] p = LinkState.NodeXyz(ctx.Model, ends[0]), q = LinkState.NodeXyz(ctx.Model, ends[1]);
+            if (p == null || q == null) return false;
+            const double tol = 0.002;
+            foreach (HingeSeg h in ctx.RhinoHingeSegs)
+            {
+                if (h.Domains != null && !h.Domains.Contains(domainGuid) && !h.Domains.Contains(LinkFile.BaseGuid(domainGuid))) continue;
+                if (OnSegment(h.A, h.B, p, tol) && OnSegment(h.A, h.B, q, tol)) return true;
+            }
+            return false;
+        }
+
+        private static bool OnSegment(double[] a, double[] b, double[] p, double tol)
+        {
+            double[] u = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+            double len2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            if (len2 < 1e-12) return false;
+            double t = ((p[0] - a[0]) * u[0] + (p[1] - a[1]) * u[1] + (p[2] - a[2]) * u[2]) / len2;
+            double len = Math.Sqrt(len2);
+            if (t < -tol / len || t > 1 + tol / len) return false;
+            double[] c = { a[0] + t * u[0] - p[0], a[1] + t * u[1] - p[1], a[2] + t * u[2] - p[2] };
+            return Math.Sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]) <= tol;
+        }
 
         /// <summary>Start point [m] of every curve in the Rhino section, to send curves back the same way round.</summary>
         private static Dictionary<string, double[]> RhinoLineStarts(JsonValue root)

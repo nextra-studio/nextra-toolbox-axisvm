@@ -40,7 +40,7 @@ NL NA split (Harff reading):
 
 ## 3. Stiffness, creep and combination factors
 
-**Stiffness.** SLS deflections use E_mean, G_mean, K_ser (2.2.3(2)). Vibration uses E_mean. The AxisVM linear analysis is run with the material's E_mean; the add-on applies creep afterwards, per load case (2.2.3(5)). Members with mixed creep behaviour (2.2.3(4), E_mean,fin = E_mean/(1+kdef)) are out of scope for v1 and give a warning.
+**Stiffness.** SLS deflections use E_mean, G_mean, K_ser (2.2.3(2)). Vibration uses E_mean. AxisVM analyses timber members at E_mean/(1+kdef of the line) (AxisVM manual, timber SLS). The add-on therefore multiplies the AxisVM displacements of every timber line by 1/(1+kdef_line) to get the instantaneous deflection at E_mean. This was verified live: a 4 m C24 beam gave exactly 1.8 × 5qL⁴/384EI at kdef = 0.8 before the correction. It then applies creep per load case (2.2.3(5)). The correction can be switched off (setting *Timber stiffness in AxisVM*). Members with mixed creep behaviour (2.2.3(4), E_mean,fin = E_mean/(1+kdef)) are out of scope for v1: with different kdef values in one model, the force distribution of the AxisVM analysis is only approximately the E_mean one.
 
 **kdef** (Table 3.2), default for each material × service class:
 
@@ -114,10 +114,19 @@ Inputs per load case i: the instantaneous relative deflection w_inst,i(x) from A
 
 ### 5.1 Measurement rule
 
-- Deflection is measured **per member, relative to the chord between its own end points**: w_rel(x) = w(x) − [w(0) + (w(L) − w(0))·x/L]. So the deflection of a secondary beam does not include the sag of the primary beam carrying it. This is the NEN 6702 principle, still good practice.
-- Direction: local z by default; local y as an option, for purlins on slopes.
-- **Cantilever** (flag per member, or auto when one end has no support and no connection): w = tip displacement relative to the root tangent; l_rep = factor × L, with factor default 2.0 (left/right, as in the AxisVM dialog).
-- The governing value is max |w_rel(x)| over the section points.
+- **Spans.**
+  - *Whole beam* mode: collinear selected lines form one beam, split into spans at nodal supports, columns and (option, default on) non-parallel connecting beams.
+  - *Each line* mode: every AxisVM line is its own span.
+  - Switch "split at non-parallel members" off when checking a girder that carries joists: they load it, they do not support it.
+- **Middle (span) reference:** w_rel(x) = w(x) − [w(0) + (w(L) − w(0))·x/L], so the deflection of a secondary beam does not include the sag of the primary beam carrying it. This is the NEN 6702 principle, still good practice.
+- **Cantilever reference** (root at the left or the right end): w_rel(x) = w(x) − w(root), optionally also minus the root rotation (tangent); l_rep = factor × L, with factor default 2.0.
+- **Type per member:**
+  - *Auto* (default) evaluates all three references (middle, left root, right root) and keeps the one with the highest utilisation. The result reports which one was used and lists all three.
+  - *Span* forces the middle reference.
+  - *Cantilever* forces a cantilever, with its root at the end that moves least (sum of |w| over the load cases).
+  - Note: on a span whose one support is much softer than the other (e.g. a stiff column and a flexible beam), Auto can pick a "cantilever" reference that includes the support settlement. Set such members to *Span*.
+- Direction: perpendicular to the member in its vertical plane (default; vertical for floors, perpendicular to the slope for rafters), global Z, or lateral.
+- The governing value is max |w_rel(x)| over the result sections.
 
 ### 5.2 Limit rows
 
@@ -228,7 +237,7 @@ From the clause text (§9.3.1 – 9.3.2.7). Scope: human-induced vibration of fl
 
 ### 8.2 Floor performance level and design situation (9.3.2.1–9.3.2.2)
 
-- f1,lim = 4·f_w   (9.12); for multi-family residential and levels I and II, f1,lim ≥ 8 Hz.
+- f1,lim = 4·f_w   (9.12); for multi-family residential and levels I and II, f1,lim ≥ 8 Hz. The add-on applies the 8 Hz minimum to multi-family buildings at every level and to levels I and II of every building. **VERIFY** whether the clause means "and" (only multi-family at I/II) instead.
 - f1 < f1,lim → **resonant**: frequency, stiffness, velocity **and** acceleration criteria.
 - f1 ≥ f1,lim → **transient**: frequency, stiffness and velocity criteria.
 

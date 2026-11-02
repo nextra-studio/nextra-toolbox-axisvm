@@ -40,7 +40,7 @@ dotnet build (Join-Path $repo 'Rhino\AxisBridge\AxisBridge.csproj') -c Release -
 if ($LASTEXITCODE) { throw 'AxisBridge build failed.' }
 Copy-Item "$bin\Newtonsoft.Json.dll" $temp
 Copy-Item "$bin\AxisBridge.rhp" (Join-Path $temp 'AxisBridge.dll')
-$rc = Join-Path $env:USERPROFILE '.nuget\packages\rhinocommon\8.6.24101.5001\lib\net48'
+$rc = Join-Path $env:USERPROFILE '.nuget\packages\rhinocommon\8.0.23304.9001\lib\net48'
 Copy-Item "$rc\RhinoCommon.dll", "$rc\Rhino.UI.dll", "$rc\Eto.dll" $temp
 $rhinoExe = Join-Path $temp 'CatalogLibraryChecks.exe'
 & $csc /nologo /target:exe /platform:x64 /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll "/r:$temp\AxisBridge.dll" "/r:$temp\RhinoCommon.dll" "/r:$temp\Newtonsoft.Json.dll" "/out:$rhinoExe" (Join-Path $repo 'Rhino\Checks\CatalogLibraryChecks.cs')
