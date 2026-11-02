@@ -5,13 +5,14 @@
 ## Overview
 The Connection Load Extractor reads the end forces of selected beams and ribs at selected nodes, for selected load
 combinations, and reports them as the **force each member exerts on the node**. The loads are given in the member's
-local axes (N, Vy, Vz, Tx, My, Mz) or in global axes (Fx, Fy, Fz, Mx, My, Mz). For **each of the six components** in
+local axes (N, Vy, Vz, Tx, My, Mz), in global axes (Fx, Fy, Fz, Mx, My, Mz) or in **custom axes** (Fx', Fy', Fz',
+Mx', My', Mz': the global axes turned by two angles you choose). For **each of the six components** in
 those axes it also finds the **critical** load combinations: the most positive (Max +) and the most negative (Min −)
 value, per member end and over all reported ends. Both the full table and the critical table can be exported for
 connection design.
 
-Menu: **N. Connection Load Extractor**. The addon does not edit the model. The only thing it changes is the
-selection, and only when you press "Select in model".
+Menu: **N. Connection Load Extractor**. The addon does not edit the structure. It changes only the selection (when you
+press "Select in model") and, while "Show axes in model" is on, one temporary drawing layer (see §9).
 
 ## Workflow & Logic
 
@@ -26,8 +27,16 @@ selection, and only when you press "Select in model".
 
 ### 2. Dialog
 - Load combinations (checklist, all ticked by default), and Linear or Non-linear static results.
-- **Coordinate system**: Local or Global. It is used both for the output and for the critical search; no component
-  is chosen, because all six are searched.
+- **Coordinate system**: Local, Global or Custom. It is used both for the output and for the critical search; no
+  component is chosen, because all six are searched.
+- **Custom** = the global axes turned by **αz about global Z**, then by **αx about the new x'**; y' and z' follow by the
+  right-hand rule. Positive angles are counter-clockwise when seen from the tip of the axis (right-hand rule): αz turns x'
+  from X toward Y, αx turns y' toward Z. x' always stays in the global XY plane. One custom frame is shared by every
+  member end. Quick buttons: Reset, z +45°, z +90°, x' +90° (they add to the current angle).
+- **Axes preview**: a 3D sketch (drag to orbit; Iso / Top / Front) with the global X / Y / Z as grey dashed arrows over
+  the XY plane, the chosen axes as red (x) / green (y) / blue (z) arrows, the two rotations as curved arrows with their
+  angle values, and the chosen axes written out as global direction cosines. For Local it shows the first member's axes.
+- **Show axes in model** draws the same arrows on the AxisVM model (§9).
 
 ### 3. Local axes (ResolveFrames)
 - Lines have no transformation matrix of their own, so the axes come from `IAxisVMMember.GetTrMatrix` of the member
@@ -60,6 +69,10 @@ arrays. Nothing else needs to change.
 Forces and moments are both true vectors, so each triple is rotated with the same frame:
 `F_global = N·ex + Vy·ey + Vz·ez`, `M_global = Tx·ex + My·ey + Mz·ez`.
 
+Custom axes: `F' = GlobalToLocal(F_global, CustomAxes.Frame)`, the frame built by `LocalFrame.RotatedZX(αz, αx)`.
+They are computed from the global vectors already read, so changing the angles never reads AxisVM again
+(`ConnectionLoadExtractorFunction.Recompute`).
+
 ### 7. Critical (FindCriticalRows)
 - For each of the six components (in the chosen axes) and each member end, every combination is evaluated:
   **Max +** is the combination with the largest value and **Min −** the one with the smallest.
@@ -81,6 +94,20 @@ Forces and moments are both true vectors, so each triple is rotated with the sam
 - **Copy tab (TSV)**: copies the visible tab to the clipboard for pasting into Excel.
 - **Select in model**: replaces the AxisVM selection with the node and line of the highlighted grid rows (or every
   target node and line if no row is highlighted), so the result can be checked in the model.
+- **Axes panel** (right): switch Local / Global / Custom or change αz / αx. All tabs, the critical search and the window
+  title update after a 0.3 s pause; the axes used are also the first line of the Checks tab and a last "Axes" column
+  in every CSV export.
+- **Show axes in model** / **Hide axes in model**: see §9.
+
+### 9. Axes in the model (AxisTriadDrawer)
+- Draws on a drawing layer named `Connection axes (temporary)` (`IAxisVMLayers`: `AddLayer`, `AddShape` with
+  `lst3DLine` shafts and `lst3DPolygonFilled` arrowheads, `AddText` labels). Not structural, no effect on the analysis.
+- Global / Custom: one triad per target node, labelled X Y Z or x' y' z'. Local: one triad per member end, labelled
+  x y z, set 20 % along the member so several members at a node stay apart. Length 0.3 × the shortest member there,
+  0.2 … 1.5 m. At most 60 triads.
+- Colours as in the preview: x red, y green, z blue. The layer follows every change of axes while it is shown.
+- The layer is deleted on Hide, when the result window closes, when the dialog is cancelled, and before a new run.
+  It is only saved in the .axs if the model is saved while the axes are shown.
 
 ## Checks
 ### Automated (no AxisVM needed)
@@ -91,7 +118,9 @@ Forces and moments are both true vectors, so each triple is rotated with the sam
 - matrix rows vs columns, left-handed and skewed frames detected;
 - sign table;
 - Max + / Min − search (mixed values, all one sign, ties, single value, empty list, NaN);
-- CSV / TSV text and culture-independent decimals.
+- CSV / TSV text and culture-independent decimals;
+- custom axes: αz = 90° and αx = 90° by hand, a 30° beam giving pure Fx', orthonormal / right-handed frames and round
+  trips for random angles, x' in the XY plane.
 
 ```
 MSBuild Checks\ConnectionLoadMathChecks.csproj /p:Configuration=Debug
@@ -120,13 +149,17 @@ Checks\bin\Debug\ConnectionLoadMathChecks.exe      (exit code 0 = all passed)
 3. **Frame test**: a 2-storey portal frame with several combinations. Select all members and no node. Joint equilibrium
    must be ✔ at the internal joints. Pick two critical rows, switch AxisVM to that combination, and compare the beam
    end forces table with the Local output.
-4. **Visual**: Select in model highlights the expected nodes / lines. Exported CSVs open in Excel with correct columns
+4. **Custom axes**: with the 30° beam, Custom αz = 30° gives its axial force purely in Fx'; the in-model x' arrow lies
+   along that beam. Show / Hide axes adds and removes exactly one layer.
+5. **Visual**: Select in model highlights the expected nodes / lines. Exported CSVs open in Excel with correct columns
    and decimals.
 
 ## File Structure
 - `Addons/ConnectionLoadExtractorAddon.cs`: AxisVM interface registration and icon.
-- `UI/ConnectionLoadExtractorForm.cs`: input dialog (combinations, analysis type, output system, critical direction).
-- `UI/ConnectionLoadResultForm.cs`: Critical / All / Checks tabs, CSV / clipboard export, Select in model.
+- `UI/ConnectionLoadExtractorForm.cs`: input dialog (combinations, analysis type, coordinate system, custom angles).
+- `UI/ConnectionLoadResultForm.cs`: Critical / All / Checks tabs, axes panel, CSV / clipboard export, Select in model.
+- `UI/AxisPreviewControl.cs`: the 3D axes preview and the αz / αx editor shared by both windows.
+- `Functions/AxisTriadDrawer.cs`: the x / y / z arrows on the AxisVM model (temporary drawing layer).
 - `Functions/ConnectionLoadExtractorFunction.cs`: selection, local axes, force reading, critical search, run-time checks.
 - `Core/ConnectionLoadMath.cs`: pure maths (frames, sign table, transforms, critical search, CSV). No COM.
 - `../Checks/ConnectionLoadMathChecks.*`: console checks for the maths.

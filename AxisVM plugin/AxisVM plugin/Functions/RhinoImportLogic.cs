@@ -94,7 +94,7 @@ namespace AxisVM_plugin.Functions
                     "Live link", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
                 return 1;
 
-            int rc = RunImport(app, model, form, path, true, false, LinkFile.RhinoKnownGuids(root));
+            int rc = RunImport(app, model, form, path, true, false, LinkFile.RhinoKnownGuids(root), RhinoLinkSender.AdoptedPanels(root));
             if (rc != 1) return rc;
 
             try { RhinoLinkSender.MarkLoaded(model, path, LinkFile.Get(root[LinkFile.RhinoSection], "sent")); }
@@ -132,6 +132,10 @@ namespace AxisVM_plugin.Functions
                 sb.AppendLine(string.Format("  new          {0}   (drawn in AxisVM - Rhino creates them)", r.Adopted));
                 sb.AppendLine(string.Format("  deleted      {0}", r.Deleted));
                 sb.AppendLine();
+                sb.AppendLine("Library (always sent in full; Rhino adds what it lacks)");
+                sb.AppendLine(string.Format("  {0} material(s), {1} section(s), {2} load case(s), {3} combination(s)   ({4} not in Rhino yet)",
+                    r.Library[0], r.Library[1], r.Library[2], r.Library[3], r.LibraryNew));
+                sb.AppendLine();
                 sb.AppendLine("Notes");
                 foreach (string n in r.Notes) sb.AppendLine("  - " + n);
                 sb.AppendLine();
@@ -156,7 +160,8 @@ namespace AxisVM_plugin.Functions
         // ==================================================================
 
         private static int RunImport(IAxisVMApplication app, IAxisVMModel model, RhinoImportForm form,
-                                     string jsonPath, bool replacePrevious, bool dryRun, HashSet<string> rhinoKnownGuids)
+                                     string jsonPath, bool replacePrevious, bool dryRun, HashSet<string> rhinoKnownGuids,
+                                     Dictionary<string, string> adoptedPanels = null)
         {
             List<string> notes = new List<string>();
 
@@ -185,6 +190,8 @@ namespace AxisVM_plugin.Functions
                 AutoIntersect = form.AutoIntersect,
                 ReplacePrevious = replacePrevious,
                 RhinoKnownGuids = rhinoKnownGuids,
+                AdoptedPanels = adoptedPanels,
+                RemeshRebuilt = form.RemeshRebuilt,
                 SourcePath = jsonPath
             };
 
@@ -269,6 +276,7 @@ namespace AxisVM_plugin.Functions
             sb.AppendLine(string.Format("  springs      {0}", stats.SpringsCreated));
             sb.AppendLine(string.Format("  links        {0} node-node, {1} rigid bodies", stats.LinksCreated, stats.RigidBodiesCreated));
             sb.AppendLine(string.Format("  edge hinges  {0}", stats.HingesCreated));
+            if (stats.DiaphragmsCreated > 0) sb.AppendLine(string.Format("  diaphragms   {0}", stats.DiaphragmsCreated));
             sb.AppendLine(string.Format("  loads        {0}", stats.LoadsCreated));
             sb.AppendLine(string.Format("  parts        {0}", stats.PartsCreated));
             if (stats.MembersAssembled > 0)

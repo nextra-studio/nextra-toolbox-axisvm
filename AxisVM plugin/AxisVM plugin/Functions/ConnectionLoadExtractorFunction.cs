@@ -45,6 +45,9 @@ namespace AxisVM_plugin.Functions
         public int MemberId;        // AxisVM member index the line belongs to
         public bool IsStart;        // true = start of local x (PosX = 0), false = end (PosX = L)
         public LocalFrame Frame;    // the line's local axes in global coordinates
+        public Vec3 NodePoint;      // the node's coordinates
+        public Vec3 Inward;         // unit vector from the node into the member
+        public double LineLength;
 
         /// <summary>"Start" or "End" for the tables.</summary>
         public string EndLabel { get { return IsStart ? "Start" : "End"; } }
@@ -59,9 +62,13 @@ namespace AxisVM_plugin.Functions
         public double[] Raw;        // AxisVM internal forces at the section (N, Vy, Vz, Tx, My, Mz)
         public double[] NodeLocal;  // force the member exerts on the node, member local axes
         public double[] Global;     // the same, global axes
+        public double[] Custom;     // the same, custom axes (null until a custom system is set)
 
         /// <summary>The six components in the requested system.</summary>
-        public double[] In(LoadSystem system) { return system == LoadSystem.Local ? NodeLocal : Global; }
+        public double[] In(LoadSystem system)
+        {
+            return system == LoadSystem.Local ? NodeLocal : system == LoadSystem.Custom ? Custom : Global;
+        }
     }
 
     /// <summary>A Max+ or Min- result of one component, either for one member end or (End == null) over all ends.</summary>
@@ -78,7 +85,12 @@ namespace AxisVM_plugin.Functions
     public class ExtractionResult
     {
         public LoadSystem Axes;                               // output AND critical search axes
+        public CustomAxes Custom = new CustomAxes(0, 0);      // the angles of the custom system (kept when another system is shown)
+        public List<MemberEnd> Ends = new List<MemberEnd>();  // every reported member end, in table order
         public List<EndLoadRow> All = new List<EndLoadRow>();
+
+        /// <summary>"Global axes", "Local axes" or "Custom: αz = 30°, αx = 0°" for titles and exports.</summary>
+        public string AxesText { get { return Axes == LoadSystem.Custom ? Custom.Describe() : Axes + " axes"; } }
         public List<CriticalRow> Critical = new List<CriticalRow>(); // all six components
         public List<string> Checks = new List<string>();
         public List<int> TargetNodeIds = new List<int>();
@@ -95,6 +107,7 @@ namespace AxisVM_plugin.Functions
             public int MemberId;
             public int StartNodeId;
             public int EndNodeId;
+            public Vec3 StartPoint, EndPoint;
             public Vec3 Direction;      // unit vector start node -> end node
             public double Length;
             public RMatrix3x3 Matrix;   // member transformation matrix, as returned
@@ -114,9 +127,10 @@ namespace AxisVM_plugin.Functions
 
         public static int Execute(IAxisVMApplication app, int ownerHandle = 0)
         {
+            IAxisVMModel model = null;
             try
             {
-                var model = app.Models.Item[1];
+                model = app.Models.Item[1];
                 if (model == null) return -1;
 
                 // ------------------------------------------------------------------
@@ -190,13 +204,24 @@ namespace AxisVM_plugin.Functions
                     lines.Count, ends.Count, ends.Select(e => e.NodeId).Distinct().Count(),
                     selectedNodes.Count == 0 ? " (no node selected: all member ends)" : "");
 
-                using (ConnectionLoadExtractorForm form = new ConnectionLoadExtractorForm(summary, comboNames))
+                // The in-model axis triad: drawn on request from the dialog and the result window, for the ends found here
+                Func<LoadSystem, CustomAxes, string> showAxes = (system, custom) =>
+                    AxisTriadDrawer.Show(app, model, BuildTriads(ends, system, custom));
+                Action hideAxes = () => AxisTriadDrawer.Hide(model);
+
+                // A previous result window's triad would otherwise stay behind, and so would one saved in the .axs
+                if (openResultForm != null && !openResultForm.IsDisposed) openResultForm.Close();
+                hideAxes();
+
+                using (ConnectionLoadExtractorForm form = new ConnectionLoadExtractorForm(summary, comboNames, ends[0].Frame, showAxes, hideAxes))
                 {
-                    if (form.ShowDialog() != DialogResult.OK) return 1;
+                    if (form.ShowDialog() != DialogResult.OK) { hideAxes(); return 1; }
 
                     ExtractionResult result = new ExtractionResult
                     {
                         Axes = form.Axes,
+                        Custom = form.Custom,
+                        Ends = ends,
                         TargetNodeIds = ends.Select(e => e.NodeId).Distinct().OrderBy(n => n).ToList()
                     };
                     result.Checks.AddRange(checks);
@@ -211,9 +236,9 @@ namespace AxisVM_plugin.Functions
                         ReadAllRows(model, lines, ends, form.SelectedComboIds, comboNames, analysis, result);
 
                         // --------------------------------------------------------------
-                        // 5. Critical combinations
+                        // 5. Custom components + critical combinations
                         // --------------------------------------------------------------
-                        FindCriticalRows(ends, result);
+                        Recompute(result, result.Axes, result.Custom);
 
                         // --------------------------------------------------------------
                         // 6. Checks that need forces
@@ -225,6 +250,7 @@ namespace AxisVM_plugin.Functions
 
                     if (result.All.Count == 0)
                     {
+                        hideAxes();
                         MessageBox.Show("No results could be read for the chosen combinations. Has the model been calculated (" +
                             (form.NonLinear ? "non-linear" : "linear") + " static)?\n\n" + string.Join("\n", result.Checks),
                             Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -236,9 +262,8 @@ namespace AxisVM_plugin.Functions
                     //    window is open. The window calls back to select items in the model. It is not disposed here:
                     //    a modeless form disposes itself when the user closes it.
                     // ------------------------------------------------------------------
-                    if (openResultForm != null && !openResultForm.IsDisposed) openResultForm.Close();
                     ConnectionLoadResultForm resultForm = new ConnectionLoadResultForm(result,
-                        (nodes, selLines) => SelectInModel(model, nodes, selLines));
+                        (nodes, selLines) => SelectInModel(model, nodes, selLines), showAxes, hideAxes, form.AxesShown);
                     openResultForm = resultForm;
                     resultForm.StartPosition = FormStartPosition.Manual;
                     resultForm.Location = new System.Drawing.Point(80, 80);
@@ -248,6 +273,8 @@ namespace AxisVM_plugin.Functions
             }
             catch (Exception ex)
             {
+                // A triad drawn from the dialog must not stay behind when the run fails before the result window owns it
+                if (model != null && (openResultForm == null || openResultForm.IsDisposed)) AxisTriadDrawer.Hide(model);
                 MessageBox.Show("Error: " + ex.Message, Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return -1;
             }
@@ -309,7 +336,9 @@ namespace AxisVM_plugin.Functions
                 RNode n1 = new RNode(), n2 = new RNode();
                 model.Nodes.GetNode(info.StartNodeId, ref n1);
                 model.Nodes.GetNode(info.EndNodeId, ref n2);
-                Vec3 d = new Vec3(n2.x - n1.x, n2.y - n1.y, n2.z - n1.z);
+                info.StartPoint = new Vec3(n1.x, n1.y, n1.z);
+                info.EndPoint = new Vec3(n2.x, n2.y, n2.z);
+                Vec3 d = info.EndPoint - info.StartPoint;
                 info.Length = d.Length;
                 info.Direction = d.Normalized();
 
@@ -385,9 +414,11 @@ namespace AxisVM_plugin.Functions
             {
                 // A line can have both ends on selected nodes - both are reported
                 if (selectedNodes.Count == 0 || selectedNodes.Contains(li.StartNodeId))
-                    ends.Add(new MemberEnd { NodeId = li.StartNodeId, LineId = li.LineId, MemberId = li.MemberId, IsStart = true, Frame = li.Frame });
+                    ends.Add(new MemberEnd { NodeId = li.StartNodeId, LineId = li.LineId, MemberId = li.MemberId, IsStart = true, Frame = li.Frame,
+                        NodePoint = li.StartPoint, Inward = li.Direction, LineLength = li.Length });
                 if (selectedNodes.Count == 0 || selectedNodes.Contains(li.EndNodeId))
-                    ends.Add(new MemberEnd { NodeId = li.EndNodeId, LineId = li.LineId, MemberId = li.MemberId, IsStart = false, Frame = li.Frame });
+                    ends.Add(new MemberEnd { NodeId = li.EndNodeId, LineId = li.LineId, MemberId = li.MemberId, IsStart = false, Frame = li.Frame,
+                        NodePoint = li.EndPoint, Inward = -li.Direction, LineLength = li.Length });
             }
             foreach (MemberEnd e in ends) usedNodes.Add(e.NodeId);
 
@@ -509,6 +540,66 @@ namespace AxisVM_plugin.Functions
         // ------------------------------------------------------------------
         // Critical
         // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Switches the result to another system / custom angles without reading AxisVM again: the custom
+        /// components are recomputed from the global ones, then the critical rows are searched afresh.
+        /// Called after reading and every time the result window changes the axes.
+        /// </summary>
+        public static void Recompute(ExtractionResult result, LoadSystem axes, CustomAxes custom)
+        {
+            result.Axes = axes;
+            result.Custom = custom;
+            LocalFrame f = custom.Frame;
+            foreach (EndLoadRow r in result.All) r.Custom = ConnectionLoadMath.GlobalToLocal(r.Global, f);
+
+            result.Critical.Clear();
+            FindCriticalRows(result.Ends, result);
+
+            // One line in the Checks tab says which axes the tables use (replaced on every change)
+            result.Checks.RemoveAll(c => c.StartsWith(AxesCheckPrefix));
+            string text = axes == LoadSystem.Custom
+                ? string.Format("{0} {1}: x' = {2}, y' = {3}, z' = {4} in global axes{5}", AxesCheckPrefix, custom.Describe(), f.Ex, f.Ey, f.Ez,
+                    f.OrthonormalError() < 1e-9 ? "" : " ⚠ NOT orthonormal")
+                : AxesCheckPrefix + " " + result.AxesText;
+            result.Checks.Insert(0, text);
+        }
+
+        private const string AxesCheckPrefix = "ℹ Axes";
+
+        /// <summary>
+        /// The arrow triads that show the given system on the model: Global / Custom one per node, Local one per
+        /// member end, set 20 % along the member so several members at one node do not hide each other.
+        /// </summary>
+        public static List<AxisTriad> BuildTriads(IList<MemberEnd> ends, LoadSystem system, CustomAxes custom)
+        {
+            const int maxTriads = 60;
+            List<AxisTriad> triads = new List<AxisTriad>();
+            if (system == LoadSystem.Local)
+            {
+                foreach (MemberEnd e in ends.Take(maxTriads))
+                {
+                    double size = Clamp(0.3 * e.LineLength);
+                    triads.Add(new AxisTriad
+                    {
+                        Origin = e.NodePoint + (Math.Min(0.2 * e.LineLength, 2 * size)) * e.Inward,
+                        Axes = e.Frame,
+                        Size = size,
+                        Labels = new[] { "x", "y", "z" }
+                    });
+                }
+                return triads;
+            }
+
+            LocalFrame frame = system == LoadSystem.Custom ? custom.Frame : LocalFrame.GlobalAxes;
+            string[] labels = system == LoadSystem.Custom ? new[] { "x'", "y'", "z'" } : new[] { "X", "Y", "Z" };
+            foreach (var g in ends.GroupBy(e => e.NodeId).Take(maxTriads))
+                triads.Add(new AxisTriad { Origin = g.First().NodePoint, Axes = frame, Size = Clamp(0.3 * g.Min(e => e.LineLength)), Labels = labels });
+            return triads;
+        }
+
+        /// <summary>Arrow length kept readable: 0.2 .. 1.5 m.</summary>
+        private static double Clamp(double size) { return Math.Max(0.2, Math.Min(1.5, size)); }
 
         /// <summary>
         /// Max+ and Min- of every one of the six components (in the result's axes), per member end and over

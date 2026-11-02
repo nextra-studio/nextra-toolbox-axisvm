@@ -85,8 +85,26 @@ namespace AxisBridge.Library
         [JsonProperty("description")] public string Description { get; set; } = "";
     }
 
+    /// <summary>One "factor x load case" term of a load combination.</summary>
+    public class LibCombinationTerm
+    {
+        [JsonProperty("case")] public string Case { get; set; } = "";
+        [JsonProperty("factor")] public double Factor { get; set; } = 1.0;
+    }
+
     /// <summary>
-    /// The per-document library of materials, cross-sections and load cases.
+    /// A load combination of the library. Type is AxisVM's combination type without its "ct" prefix
+    /// (ULS, SLSChar, SLSQuasi, Other, ...); AxisVM creates the combination from these terms when the model is imported.
+    /// </summary>
+    public class LibCombination
+    {
+        [JsonProperty("name")] public string Name { get; set; } = "";
+        [JsonProperty("type")] public string Type { get; set; } = "Other";
+        [JsonProperty("terms")] public List<LibCombinationTerm> Terms { get; set; } = new List<LibCombinationTerm>();
+    }
+
+    /// <summary>
+    /// The per-document library of materials, cross-sections, load cases and load combinations.
     ///
     /// It lives in the .3dm (document user strings, section "AxisBridge"), so it travels with the
     /// model, and it is written into the AxExport JSON so AxisVM creates the load cases in this order
@@ -100,6 +118,7 @@ namespace AxisBridge.Library
         [JsonProperty("materials")] public List<LibMaterial> Materials { get; set; } = new List<LibMaterial>();
         [JsonProperty("sections")] public List<LibSection> Sections { get; set; } = new List<LibSection>();
         [JsonProperty("loadCases")] public List<LibLoadCase> LoadCases { get; set; } = new List<LibLoadCase>();
+        [JsonProperty("combinations")] public List<LibCombination> Combinations { get; set; } = new List<LibCombination>();
 
         /// <summary>Common Eurocode grades offered by "Add preset" in the library dialog.</summary>
         public static readonly string[][] MaterialPresets =
@@ -172,6 +191,8 @@ namespace AxisBridge.Library
             if (Materials == null) Materials = new List<LibMaterial>();
             if (Sections == null) Sections = new List<LibSection>();
             if (LoadCases == null) LoadCases = new List<LibLoadCase>();
+            if (Combinations == null) Combinations = new List<LibCombination>();
+            Combinations = Distinct(Combinations, c => c.Name);
             Materials = Distinct(Materials, m => m.Name);
             Sections = Distinct(Sections, s => s.Name);
             LoadCases = Distinct(LoadCases, c => c.Name);
@@ -198,6 +219,68 @@ namespace AxisBridge.Library
         public List<string> MaterialNames() { return Names(Materials, m => m.Name); }
         public List<string> SectionNames() { return Names(Sections, s => s.Name); }
         public List<string> LoadCaseNames() { return Names(LoadCases, c => c.Name); }
+
+        /// <summary>
+        /// Library names are the same when they differ only in spaces or case: AxisVM spells "IPE 300" and "S 235" where
+        /// the Rhino library has "IPE300" and "S235", and a merge must not add the second spelling.
+        /// </summary>
+        public static bool SameName(string a, string b)
+        {
+            return string.Equals(Squeeze(a), Squeeze(b), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string Squeeze(string s)
+        {
+            return (s ?? "").Replace(" ", "").Replace("\t", "");
+        }
+
+        /// <summary>How many entries a merge from AxisVM added.</summary>
+        public class MergeResult
+        {
+            public int Materials, Sections, LoadCases, Combinations;
+            public int Total { get { return Materials + Sections + LoadCases + Combinations; } }
+        }
+
+        /// <summary>
+        /// Adds what the AxisVM model defines and this library lacks (by name, case-insensitive): the "library" of
+        /// the link file's axisvm section. Entries already here are kept as they are and nothing is ever removed.
+        /// </summary>
+        public MergeResult MergeFrom(Newtonsoft.Json.Linq.JToken axisvm)
+        {
+            var res = new MergeResult();
+            if (axisvm == null || axisvm.Type != Newtonsoft.Json.Linq.JTokenType.Object) return res;
+
+            foreach (var t in (axisvm["materials"] as Newtonsoft.Json.Linq.JArray) ?? new Newtonsoft.Json.Linq.JArray())
+            {
+                var m = t.ToObject<LibMaterial>();
+                if (m == null || string.IsNullOrWhiteSpace(m.Name) || MaterialNames().Exists(x => SameName(x, m.Name))) continue;
+                if (string.IsNullOrEmpty(m.Family)) m.Family = GuessFamily(m.Name);
+                Materials.Add(m);
+                res.Materials++;
+            }
+            foreach (var t in (axisvm["sections"] as Newtonsoft.Json.Linq.JArray) ?? new Newtonsoft.Json.Linq.JArray())
+            {
+                var s = t.ToObject<LibSection>();
+                if (s == null || string.IsNullOrWhiteSpace(s.Name) || Sections.Exists(x => SameName(x.Name, s.Name))) continue;
+                Sections.Add(s);
+                res.Sections++;
+            }
+            foreach (var t in (axisvm["loadCases"] as Newtonsoft.Json.Linq.JArray) ?? new Newtonsoft.Json.Linq.JArray())
+            {
+                var c = t.ToObject<LibLoadCase>();
+                if (c == null || string.IsNullOrWhiteSpace(c.Name) || LoadCaseNames().Exists(x => SameName(x, c.Name))) continue;
+                LoadCases.Add(c);
+                res.LoadCases++;
+            }
+            foreach (var t in (axisvm["combinations"] as Newtonsoft.Json.Linq.JArray) ?? new Newtonsoft.Json.Linq.JArray())
+            {
+                var c = t.ToObject<LibCombination>();
+                if (c == null || string.IsNullOrWhiteSpace(c.Name) || Combinations.Exists(x => SameName(x.Name, c.Name))) continue;
+                Combinations.Add(c);
+                res.Combinations++;
+            }
+            return res;
+        }
 
         private static List<string> Names<T>(List<T> items, Func<T, string> name)
         {

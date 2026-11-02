@@ -23,6 +23,7 @@ namespace AxisVM_plugin.Checks
             SignTable();
             CriticalSearch();
             DelimitedText();
+            CustomAxesChecks();
 
             Console.WriteLine();
             Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -206,6 +207,47 @@ namespace AxisVM_plugin.Checks
             string n = ConnectionLoadMath.Num(1.5);
             System.Threading.Thread.CurrentThread.CurrentCulture = old;
             Check("7e. Number format culture-independent (nl-NL)", n == "1.500", n);
+        }
+
+        private static bool Near(Vec3 a, Vec3 b) { return (a - b).Length < 1e-9; }
+
+        /// <summary>8. Custom axes: global turned about Z, then about the new x'.</summary>
+        private static void CustomAxesChecks()
+        {
+            LocalFrame f = new CustomAxes(90, 0).Frame;
+            Check("8a. αz = 90: x' = Y, y' = -X, z' = Z", Near(f.Ex, new Vec3(0, 1, 0)) && Near(f.Ey, new Vec3(-1, 0, 0)) && Near(f.Ez, new Vec3(0, 0, 1)));
+            double[] c = ConnectionLoadMath.GlobalToLocal(new double[] { 10, 0, 0, 0, 0, 4 }, f);
+            Check("8b. αz = 90: Fx = 10 -> Fy' = -10, Mz = 4 -> Mz' = 4", Near(c, new double[] { 0, -10, 0, 0, 0, 4 }), Show(c));
+
+            f = new CustomAxes(0, 90).Frame;
+            Check("8c. αx = 90: x' = X, y' = Z, z' = -Y", Near(f.Ex, new Vec3(1, 0, 0)) && Near(f.Ey, new Vec3(0, 0, 1)) && Near(f.Ez, new Vec3(0, -1, 0)));
+            c = ConnectionLoadMath.GlobalToLocal(new double[] { 0, 3, 7, 0, 0, 0 }, f);
+            Check("8d. αx = 90: Fz = 7 -> Fy' = 7, Fy = 3 -> Fz' = -3", Near(c, new double[] { 0, 7, -3, 0, 0, 0 }), Show(c));
+
+            f = new CustomAxes(30, 0).Frame;
+            double cs = Math.Cos(Math.PI / 6), sn = Math.Sin(Math.PI / 6);
+            c = ConnectionLoadMath.GlobalToLocal(new double[] { 10 * cs, 10 * sn, 0, 0, 0, 0 }, f);
+            Check("8e. αz = 30: a force along a 30° beam is pure Fx'", Near(c, new double[] { 10, 0, 0, 0, 0, 0 }), Show(c));
+
+            f = new CustomAxes(30, 20).Frame;
+            Check("8f. αz = 30, αx = 20: orthonormal and right-handed", f.OrthonormalError() < 1e-12);
+            Check("8g. x' stays in the global XY plane", Math.Abs(f.Ex.Z) < 1e-12);
+
+            Random rnd = new Random(3);
+            bool ok = true;
+            for (int i = 0; i < 1000 && ok; i++)
+            {
+                LocalFrame r = new CustomAxes((rnd.NextDouble() - .5) * 720, (rnd.NextDouble() - .5) * 720).Frame;
+                double[] g = RandomVector(rnd);
+                double[] l = ConnectionLoadMath.GlobalToLocal(g, r);
+                ok = r.OrthonormalError() < 1e-9 && Near(ConnectionLoadMath.LocalToGlobal(l, r), g, 1e-9)
+                     && Math.Abs(new Vec3(g[0], g[1], g[2]).Length - new Vec3(l[0], l[1], l[2]).Length) < 1e-9;
+            }
+            Check("8h. Random angles: orthonormal, round trip, |F| kept (1000)", ok);
+
+            c = ConnectionLoadMath.GlobalToLocal(new double[] { 1, 2, 3, 4, 5, 6 }, new CustomAxes(0, 0).Frame);
+            Check("8i. αz = αx = 0: custom = global", Near(c, new double[] { 1, 2, 3, 4, 5, 6 }));
+            Check("8j. Custom component names", ConnectionLoadMath.Names(LoadSystem.Custom)[0] == "Fx'" && ConnectionLoadMath.Names(LoadSystem.Custom)[5] == "Mz'");
         }
     }
 }

@@ -90,6 +90,10 @@ namespace AxisVM_plugin.Core
                 }
                 AssembleMembers(job);
             }
+
+            if (orientRefused.Count > 0)
+                notes.Add(string.Format("{0} curve(s), e.g. {1}: AxisVM did not take the local x orientation along the Rhino curve (usual for round " +
+                    "sections); local member loads on them follow AxisVM's own direction.", orientRefused.Count, orientRefusedExample));
         }
 
         private class ResolvedProfile
@@ -194,6 +198,18 @@ namespace AxisVM_plugin.Core
                     role = LineRole.Rib;
                 }
                 if (line.DefineAsRib(p.Material, p.StartSection, p.EndSection, ref e1, ref e2) > 0) return true;
+                if (role == LineRole.Rib)
+                {
+                    // A rib moved off its slab: AxisVM has no surface to attach it to, so it becomes a beam.
+                    int rc;
+                    try { rc = line.DefineAsBeam(p.Material, p.StartSection, p.EndSection, ref e1, ref e2); } catch { rc = 0; }
+                    if (rc > 0)
+                    {
+                        role = LineRole.Beam;
+                        notes.Add(job.Context + ": a Rib that is not on a slab edge or in a slab - created as a Beam instead.");
+                        return true;
+                    }
+                }
                 notes.Add(job.Context + ": AxisVM rejected the member definition (check its material and section).");
                 return false;
             }
@@ -245,8 +261,13 @@ namespace AxisVM_plugin.Core
                 localXStartNode[s.Id] = s.CurveStartNode;
                 notes.Add(job.Context + ": AxisVM did not accept its eccentricity (a rib on a domain edge takes its offset from the domain); the local x orientation was set.");
             }
-            else notes.Add(job.Context + (wantsEcc ? ": its eccentricity / orientation could not be set." : ": its local x orientation could not be set."));
+            else if (wantsEcc) notes.Add(job.Context + ": its eccentricity / orientation could not be set.");
+            else if (orientRefused.Add(job.Src.Guid) && orientRefusedExample == null) orientRefusedExample = job.Context;
         }
+
+        /// <summary>Curves whose local x orientation AxisVM refused - reported once, counted, after the member types.</summary>
+        private readonly HashSet<string> orientRefused = new HashSet<string>(StringComparer.Ordinal);
+        private string orientRefusedExample;
 
         private static RhinoXyz LerpXyz(RhinoXyz a, RhinoXyz b, double t)
         {
@@ -368,7 +389,7 @@ namespace AxisVM_plugin.Core
         /// <summary>One AxisVM structural member per straight run of the curve (a polyline gives one per side).</summary>
         private void AssembleMembers(LineJob job)
         {
-            int i = 0;
+            int i = 0, runs = 0, member = 0, owned = 0;
             List<SegRef> segs = job.Chain.Segs;
             while (i < segs.Count)
             {
@@ -381,13 +402,21 @@ namespace AxisVM_plugin.Core
                     i++;
                 }
                 if (run.Count == 0) continue;
+                runs++;
+                owned += run.Count;
                 try
                 {
-                    if (model.Members.Add(Ids(run.ToArray())) > 0 && run.Count > 1) stats.MembersAssembled++;
+                    member = model.Members.Add(Ids(run.ToArray()));
+                    if (member > 0 && run.Count > 1) stats.MembersAssembled++;
                 }
-                catch { }
+                catch { member = 0; }
             }
+            // The whole curve is one member: its loads go on the member, as AxisVM's own member loads.
+            if (runs == 1 && owned == segs.Count && member > 0) memberOfJob[job] = member;
         }
+
+        /// <summary>Curves that became exactly one AxisVM structural member (all their segments, one straight run).</summary>
+        private readonly Dictionary<LineJob, int> memberOfJob = new Dictionary<LineJob, int>();
 
         // ==================================================================
         // 4b - supports (nodal and line)
@@ -735,6 +764,90 @@ namespace AxisVM_plugin.Core
                 if (made == 0)
                     notes.Add(job.Context + ": no domain edge was found along this edge hinge - nothing was released.");
             }
+        }
+
+        // ==================================================================
+        // 4e - rigid diaphragms
+        // ==================================================================
+
+        /// <summary>
+        /// Ax_Diaphragm: curves and surfaces with the same name become one AxisVM rigid diaphragm (on a surface the
+        /// name stands for all its edges, holes included). Their lines are first taken out of any diaphragm they were
+        /// in, so a re-import moves them instead of leaving them in two.
+        /// </summary>
+        private void BuildDiaphragms()
+        {
+            var byName = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+            var order = new List<string>();
+            Action<string, IEnumerable<int>> take = (name, ids) =>
+            {
+                List<int> l;
+                if (!byName.TryGetValue(name, out l)) { l = new List<int>(); byName[name] = l; order.Add(name); }
+                foreach (int id in ids) if (id > 0 && !l.Contains(id)) l.Add(id);
+            };
+
+            foreach (LineJob job in lineJobs)
+            {
+                string name = job.Src.Attr(AxKeys.Diaphragm);
+                if (name != null) take(name, job.Chain.Ids());
+            }
+            foreach (SurfaceJob s in surfaceJobs)
+            {
+                string name = s.Src.Attr(AxKeys.Diaphragm);
+                if (name == null) continue;
+                if (IsPanel(s.Role)) { notes.Add(s.Context + ": a load panel cannot be a rigid diaphragm - Ax_Diaphragm ignored."); continue; }
+                take(name, s.OuterChain.Ids());
+                foreach (Chain h in s.HoleChains) take(name, h.Ids());
+            }
+
+            foreach (string name in order)
+            {
+                List<int> ids = byName[name];
+                if (ids.Count == 0) { notes.Add("Rigid diaphragm '" + name + "': none of its lines were found."); continue; }
+                if (opt.DryRun) { stats.DiaphragmsCreated++; continue; }
+                try { model.Diaphragm.RemoveLinesFromDiaphragm(Ids(ids.ToArray())); } catch { }
+                string plane;
+                int dof = DiaphragmDof(ids, out plane);
+                if (dof == 0)
+                {
+                    notes.Add("Rigid diaphragm '" + name + "': its lines do not lie in one XY, XZ or YZ plane - not created.");
+                    continue;
+                }
+                int rc;
+                try { rc = model.Diaphragm.Add(dof, Ids(ids.ToArray())); }
+                catch (Exception ex) { notes.Add("Rigid diaphragm '" + name + "': AxisVM refused it (" + ex.Message + ")."); continue; }
+                if (rc > 0) stats.DiaphragmsCreated++;
+                else notes.Add(string.Format("Rigid diaphragm '{0}' ({1} plane): AxisVM refused it (code {2}).", name, plane, rc));
+            }
+        }
+
+        /// <summary>
+        /// The dof code IAxisVMDiaphragm.Add takes for the plane the lines lie in: the in-plane freedoms as bits
+        /// (ux 1, uy 2, uz 4, rx 8, ry 16, rz 32) - XY 35, XZ 21, YZ 14, the only values AxisVM accepts. 0 when the
+        /// lines are not flat in one of those planes.
+        /// </summary>
+        private int DiaphragmDof(List<int> lineIds, out string plane)
+        {
+            plane = "";
+            double[] lo = { double.MaxValue, double.MaxValue, double.MaxValue }, hi = { double.MinValue, double.MinValue, double.MinValue };
+            foreach (int id in lineIds)
+            {
+                int[] ends = LinkState.LineNodes(model, id);
+                if (ends == null) continue;
+                foreach (int nd in ends)
+                {
+                    double[] p = LinkState.NodeXyz(model, Math.Abs(nd));
+                    if (p == null) continue;
+                    for (int k = 0; k < 3; k++) { lo[k] = Math.Min(lo[k], p[k]); hi[k] = Math.Max(hi[k], p[k]); }
+                }
+            }
+            if (lo[0] > hi[0]) return 0;
+            double tol = Math.Max(opt.MergeToleranceM, 1e-6) * 2;
+            double dx = hi[0] - lo[0], dy = hi[1] - lo[1], dz = hi[2] - lo[2];
+            if (dz <= tol) { plane = "XY"; return 35; }
+            if (dy <= tol) { plane = "XZ"; return 21; }
+            if (dx <= tol) { plane = "YZ"; return 14; }
+            return 0;
         }
 
         private static bool Names(List<string> named, RhinoDomain d)

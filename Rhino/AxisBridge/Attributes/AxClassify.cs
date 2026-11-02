@@ -71,6 +71,32 @@ namespace AxisBridge.Attributes
             return AxSchema.IsLoadPanel(AxSchema.NormalizeSurfaceType(Get(attrs, AxKeys.FeType)));
         }
 
+        /// <summary>"Pinned", "Fixed", "Roller" or "Custom" (six stiffnesses); null when there is no support.</summary>
+        public static string SupportKindName(string raw)
+        {
+            string k = (raw ?? "").Trim().ToLowerInvariant();
+            if (k.Length == 0 || k == "-") return null;
+            if (k == "fixed" || k == "fix") return "Fixed";
+            if (k == "pinned" || k == "pin") return "Pinned";
+            if (k == "roller-z" || k == "rollerz" || k == "roller") return "Roller";
+            return "Custom";
+        }
+
+        /// <summary>
+        /// Element-type name used by the AxVisualize filter: the line type (Beam, Rib, ...), the surface
+        /// type (Plate, LoadPanel, ...) or "Node" for points.
+        /// </summary>
+        public static string ElementTypeName(RhinoObject obj, IDictionary<string, string> attrs)
+        {
+            switch (KindOf(obj, attrs))
+            {
+                case AxGeomKind.Point: return "Node";
+                case AxGeomKind.Line: return LineTypeName(attrs);
+                case AxGeomKind.Domain: return DomainTypeName(attrs);
+                default: return "Other";
+            }
+        }
+
         /// <summary>Sub-layer name for a point, from which attributes it carries.</summary>
         public static string PointTypeName(IDictionary<string, string> attrs)
         {

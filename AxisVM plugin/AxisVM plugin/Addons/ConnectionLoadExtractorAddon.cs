@@ -52,7 +52,9 @@ namespace AxisVM_plugin.Addons
         public int Addon_IsItemVisible(object iAxisVMApp) { return 1; }
         public int Addon_IsModalWindow { get { return 0; } }
 
-        public byte[] Addon_IconBitmap { get { return AxisVM_plugin.Core.AddonIcons.ConnectionLoadExtractor(); } }
+        // The Static (result) toolbar has larger buttons than Geometry / Elements / Loads; a 16 px bitmap is not
+        // drawn there (AxisVM shows its default "+"), so this add-on hands over a 24 px version.
+        public byte[] Addon_IconBitmap { get { return AxisVM_plugin.Core.AddonIcons.ConnectionLoadExtractor(24); } }
 
 
         public int Addon_IconBitmapTransparentColor { get { return ColorTranslator.ToWin32(Color.Magenta); } }

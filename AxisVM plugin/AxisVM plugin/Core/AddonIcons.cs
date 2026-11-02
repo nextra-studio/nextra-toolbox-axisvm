@@ -23,6 +23,8 @@ namespace AxisVM_plugin.Core
         public static byte[] ReactionTransfer() { return ToBmp(Preview("ReactionTransfer")); }
         public static byte[] SectionModifier() { return ToBmp(Preview("SectionModifier")); }
         public static byte[] ConnectionLoadExtractor() { return ToBmp(Preview("ConnectionLoadExtractor")); }
+        /// <summary>The same drawing scaled to <paramref name="size"/> px (nearest neighbour), for toolbars with larger buttons.</summary>
+        public static byte[] ConnectionLoadExtractor(int size) { return ToBmp(Scale(Preview("ConnectionLoadExtractor"), size), size); }
         public static byte[] RhinoImport() { return ToBmp(Preview("RhinoImport")); }
 
         /// <summary>Native-size bitmap; callers own it. Documentation uses the same drawing code.</summary>
@@ -104,6 +106,18 @@ namespace AxisVM_plugin.Core
             return bitmap;
         }
 
+        /// <summary>Nearest-neighbour scale of a 16 px drawing (no blending into the transparent magenta).</summary>
+        private static Bitmap Scale(Bitmap source, int size)
+        {
+            using (source)
+            {
+                Bitmap result = new Bitmap(size, size, PixelFormat.Format24bppRgb);
+                for (int y = 0; y < size; y++)
+                    for (int x = 0; x < size; x++) result.SetPixel(x, y, source.GetPixel(x * 16 / size, y * 16 / size));
+                return result;
+            }
+        }
+
         /// <summary>One small arrow with an integral, two-pixel head, horizontal or vertical.</summary>
         private static void Arrow(Graphics g, Pen pen, int x1, int y1, int x2, int y2)
         {
@@ -113,12 +127,28 @@ namespace AxisVM_plugin.Core
             g.DrawLine(pen, x2, y2, x2 - 2 * dx - 2 * dy, y2 - 2 * dy + 2 * dx);
         }
 
-        private static byte[] ToBmp(Bitmap bitmap)
+        /// <summary>
+        /// Toolbar bytes for AxisVM. AxisVM only accepts the 32 bpp BMP that a plain new Bitmap(16, 16) saves
+        /// (what every add-on used before the shared icons); a 24 bpp BMP is rejected and AxisVM shows its default
+        /// "+" icon instead. So the 24 bpp drawing is copied pixel for pixel into a 32 bpp bitmap before saving.
+        /// </summary>
+        private static byte[] ToBmp(Bitmap bitmap, int size = 16)
         {
             using (bitmap)
+            using (Bitmap argb = new Bitmap(size, size, PixelFormat.Format32bppArgb))
             using (MemoryStream stream = new MemoryStream())
             {
-                bitmap.Save(stream, ImageFormat.Bmp);
+                for (int y = 0; y < size; y++)
+                    for (int x = 0; x < size; x++)
+                    {
+                        Color c = bitmap.GetPixel(x, y); // exact copy, alpha 255
+                        // The larger result toolbars (Static, ...) ignore the transparent colour and use the alpha
+                        // channel instead, so there the magenta background also gets alpha 0 (it stays magenta,
+                        // so a colour-keyed toolbar still sees it as transparent)
+                        if (size != 16 && c.R == 255 && c.G == 0 && c.B == 255) c = Color.FromArgb(0, 255, 0, 255);
+                        argb.SetPixel(x, y, c);
+                    }
+                argb.Save(stream, ImageFormat.Bmp);
                 return stream.ToArray();
             }
         }

@@ -90,6 +90,7 @@
     <Compile Include="UI\PanelFields.cs" />
     <Compile Include="UI\PanelPreview.cs" />
     <Compile Include="Layers\AxLayers.cs" />
+    <Compile Include="Layers\AxLayerStyle.cs" />
     <Compile Include="Export\ExportDto.cs" />
     <Compile Include="Export\GeometryFlattener.cs" />
     <Compile Include="Export\ModelExporter.cs" />
@@ -110,6 +111,11 @@
     <Compile Include="Commands\AxVisualizeCommand.cs" />
     <Compile Include="Commands\AxLayerTidyUpCommand.cs" />
     <Compile Include="Commands\AxLinkCommand.cs" />
+    <Compile Include="Commands\AxPickupCommand.cs" />
+    <Compile Include="Attributes\AxPickup.cs" />
+    <Compile Include="UI\PickupForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Link\AxLinkSync.cs" />
     <Compile Include="UI\LinkForm.cs">
       <SubType>Form</SubType>

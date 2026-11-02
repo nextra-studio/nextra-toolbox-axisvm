@@ -18,10 +18,10 @@ namespace AxisBridge.Layers
 
         /// <summary>Parent layer for the AxLayerTidyUp organised copy of the model.</summary>
         public const string TidyRoot = "AxLayer";
-        public const string TidyLines = "AxLine";
-        public const string TidyDomains = "AxDomain";
-        public const string TidyPanels = "AxLoadPanel";
-        public const string TidyPoints = "AxPoint";
+        public const string TidyLines = "Members";
+        public const string TidyDomains = "Domains";
+        public const string TidyPanels = "LoadPanels";
+        public const string TidyPoints = "Nodes";
 
         /// <summary>True if the object sits anywhere under the AxTag layer tree.</summary>
         public static bool IsOnTagTree(RhinoDoc doc, RhinoObject obj)
@@ -82,6 +82,46 @@ namespace AxisBridge.Layers
             }
 
             return index;
+        }
+
+        /// <summary>
+        /// Deletes every layer under "rootName::" (not the root itself) that holds no objects, hidden and
+        /// locked ones included, and has no remaining sub-layers. Returns the number of layers removed.
+        /// </summary>
+        public static int DeleteEmptyUnder(RhinoDoc doc, string rootName)
+        {
+            if (doc == null) return 0;
+
+            var candidates = new System.Collections.Generic.List<int>();
+            for (int i = 0; i < doc.Layers.Count; i++)
+            {
+                Layer l = doc.Layers[i];
+                if (!l.IsDeleted && l.FullPath.StartsWith(rootName + Sep, StringComparison.OrdinalIgnoreCase))
+                    candidates.Add(i);
+            }
+
+            // Deepest first, so a parent becomes empty once its children are gone.
+            candidates.Sort((a, b) => doc.Layers[b].FullPath.Length.CompareTo(doc.Layers[a].FullPath.Length));
+
+            var settings = new ObjectEnumeratorSettings { NormalObjects = true, LockedObjects = true, HiddenObjects = true, DeletedObjects = false };
+            int removed = 0;
+            foreach (int li in candidates)
+            {
+                Layer l = doc.Layers[li];
+                if (l.IsDeleted) continue;
+                Layer[] kids = l.GetChildren();
+                bool hasKids = false;
+                if (kids != null) foreach (Layer k in kids) if (!k.IsDeleted) { hasKids = true; break; }
+                if (hasKids) continue;
+
+                settings.LayerIndexFilter = li;
+                bool hasObjects = false;
+                foreach (RhinoObject o in doc.Objects.GetObjectList(settings)) { hasObjects = true; break; }
+                if (hasObjects || li == doc.Layers.CurrentLayerIndex) continue;
+
+                if (doc.Layers.Delete(li, true)) removed++;
+            }
+            return removed;
         }
 
         /// <summary>Deletes the whole "rootName::*" tree, purging any objects on it first.</summary>

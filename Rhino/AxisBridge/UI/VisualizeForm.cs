@@ -28,7 +28,16 @@ namespace AxisBridge.UI
 
         private readonly AxVisualConduit conduit;
         private readonly ComboBox caseBox;
+        private readonly CheckedListBox typeList;
         private bool updatingCases;
+        private bool updatingTypes;
+
+        /// <summary>Display order of the element types; anything else follows alphabetically.</summary>
+        private static readonly string[] TypeOrder =
+        {
+            "Node", "Beam", "Rib", "Truss", "Spring", "RigidLink", "NodeLink", "EdgeHinge", "Simple",
+            "Shell", "Plate", "Membrane", "LoadPanel", "OneWayLoadPanel", "Untyped", "Other"
+        };
 
         public static void Toggle()
         {
@@ -43,15 +52,15 @@ namespace AxisBridge.UI
 
         private VisualizeForm()
         {
-            Theme.Dialog(this, "AxVisualize", new Size(300, 560));
+            Theme.Dialog(this, "AxVisualize", new Size(300, 760));
             StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(280, 480);
+            MinimumSize = new Size(280, 520);
             MaximizeBox = false;
 
             conduit = new AxVisualConduit(Last);
             conduit.Rebuilt += (s, e) =>
             {
-                if (!IsDisposed && IsHandleCreated) BeginInvoke((Action)FillCases);
+                if (!IsDisposed && IsHandleCreated) BeginInvoke((Action)FillLists);
             };
 
             var page = new FlowLayoutPanel
@@ -62,6 +71,25 @@ namespace AxisBridge.UI
                 AutoScroll = true,
                 Padding = new Padding(12, 10, 12, 10)
             };
+
+            page.Controls.Add(SectionLabel("Elements"));
+            typeList = new CheckedListBox { CheckOnClick = true, Width = 240, Height = 60, IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle };
+            typeList.ItemCheck += (s, e) =>
+            {
+                if (updatingTypes) return;
+                string t = (string)typeList.Items[e.Index];
+                if (e.NewValue == CheckState.Checked) Last.HiddenTypes.Remove(t); else Last.HiddenTypes.Add(t);
+                AxVisualConduit.Redraw();
+            };
+            page.Controls.Add(typeList);
+            var all = new LinkLabel { Text = "All", AutoSize = true, Margin = new Padding(3, 2, 8, 2) };
+            all.LinkClicked += (s, e) => SetAllTypes(true);
+            var none = new LinkLabel { Text = "None", AutoSize = true, Margin = new Padding(3, 2, 3, 2) };
+            none.LinkClicked += (s, e) => SetAllTypes(false);
+            var links = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 2) };
+            links.Controls.Add(all);
+            links.Controls.Add(none);
+            page.Controls.Add(links);
 
             page.Controls.Add(SectionLabel("Show"));
             page.Controls.Add(Check("Element info (type, section, material)", Last.Info, v => Last.Info = v));
@@ -109,12 +137,59 @@ namespace AxisBridge.UI
             Controls.Add(bar);
             Controls.Add(Theme.Header("AxVisualize", "Display only - nothing is added to the model"));
 
-            Load += (s, e) => { FillCases(); conduit.Start(); };
+            Load += (s, e) => { FillLists(); conduit.Start(); };
             FormClosed += (s, e) =>
             {
                 conduit.Stop();
                 if (Current == this) Current = null;
             };
+        }
+
+        private void FillLists()
+        {
+            FillTypes();
+            FillCases();
+        }
+
+        /// <summary>One tick per element type found in the model; unticked types stay hidden across refreshes.</summary>
+        private void FillTypes()
+        {
+            var names = new List<string>(conduit.TypeNames);
+            names.Sort((a, b) =>
+            {
+                int ia = Array.IndexOf(TypeOrder, a), ib = Array.IndexOf(TypeOrder, b);
+                if (ia < 0) ia = TypeOrder.Length;
+                if (ib < 0) ib = TypeOrder.Length;
+                return ia != ib ? ia.CompareTo(ib) : string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
+            });
+
+            updatingTypes = true;
+            try
+            {
+                typeList.BeginUpdate();
+                typeList.Items.Clear();
+                foreach (string n in names) typeList.Items.Add(n, !Last.HiddenTypes.Contains(n));
+                typeList.EndUpdate();
+            }
+            finally { updatingTypes = false; }
+            int rows = Math.Max(1, Math.Min(12, names.Count));
+            typeList.Height = rows * typeList.ItemHeight + 6;
+        }
+
+        private void SetAllTypes(bool show)
+        {
+            updatingTypes = true;
+            try
+            {
+                for (int i = 0; i < typeList.Items.Count; i++)
+                {
+                    typeList.SetItemChecked(i, show);
+                    string t = (string)typeList.Items[i];
+                    if (show) Last.HiddenTypes.Remove(t); else Last.HiddenTypes.Add(t);
+                }
+            }
+            finally { updatingTypes = false; }
+            AxVisualConduit.Redraw();
         }
 
         /// <summary>Library cases first, then any other case found on objects. Keeps the current pick.</summary>
